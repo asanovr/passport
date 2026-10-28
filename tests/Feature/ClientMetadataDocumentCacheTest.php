@@ -334,8 +334,8 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
 
         $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client');
 
-        // At least the connect timeout and the timeout: the holder may spend that long on the fetch.
-        $this->assertGreaterThanOrEqual(5, $this->start->diffInSeconds(Carbon::now()));
+        // The connect timeout, the timeout and a second more: the holder may spend that long on the fetch.
+        $this->assertGreaterThanOrEqual(6, $this->start->diffInSeconds(Carbon::now()));
     }
 
     public function testADocumentIsFetchedWithoutALockOnACacheStoreThatHasNone()

@@ -147,8 +147,9 @@ class Resolver
         $lock = $this->cache->lock($url);
 
         try {
-            // The wait covers everything the request that holds the lock may spend on its fetch.
-            $lock?->block($configuration->connectTimeout + $configuration->timeout + 1);
+            // The wait covers everything the request that holds the lock may spend on its fetch. The lock gives up
+            // a quarter of a second before the seconds it is given, so two extra seconds leave at least one spare.
+            $lock?->block($configuration->connectTimeout + $configuration->timeout + 2);
         } catch (LockTimeoutException) {
             $this->refuse($request, $url, 'another fetch of the document did not finish in time');
         }

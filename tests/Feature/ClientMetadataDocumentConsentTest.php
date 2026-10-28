@@ -360,6 +360,13 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'a name below localhost over http' => ['http://app.localhost:4000/callback'],
             'a name below localhost in capitals' => ['https://APP.Localhost/callback'],
             'another address of 127.0.0.0/8 over http' => ['http://127.0.0.2:4000/callback'],
+            'a short IPv4 form' => ['https://127.1/callback'],
+            'a decimal IPv4 form' => ['https://2130706433/callback'],
+            'a hexadecimal IPv4 form' => ['https://0x7f000001/callback'],
+            'a dotted hexadecimal IPv4 form' => ['https://0x7f.0.0.1/callback'],
+            'an octal IPv4 form' => ['https://0177.0.0.1/callback'],
+            'an IPv4-mapped IPv6 loopback address' => ['https://[::ffff:127.0.0.1]/callback'],
+            'an IPv4-mapped IPv6 loopback address in hex' => ['https://[::ffff:7f00:1]/callback'],
         ];
     }
 
@@ -374,6 +381,9 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'an address next to 127.0.0.0/8' => ['https://128.0.0.1/callback'],
             'an address that starts with 127' => ['https://127.0.0.1.example/callback'],
             'another IPv6 address' => ['https://[::2]/callback'],
+            'a short IPv4 form outside 127.0.0.0/8' => ['https://128.1/callback'],
+            'a decimal IPv4 form outside 127.0.0.0/8' => ['https://2130706431/callback'],
+            'an IPv4-mapped address outside 127.0.0.0/8' => ['https://[::ffff:10.0.0.1]/callback'],
         ];
     }
 
