@@ -4,6 +4,7 @@ namespace Laravel\Passport\Bridge;
 
 use Illuminate\Contracts\Hashing\Hasher;
 use Laravel\Passport\Client as ClientModel;
+use Laravel\Passport\ClientMetadata\Resolver;
 use Laravel\Passport\ClientRepository as ClientModelRepository;
 use League\OAuth2\Server\Entities\ClientEntityInterface;
 use League\OAuth2\Server\Repositories\ClientRepositoryInterface;
@@ -24,7 +25,17 @@ class ClientRepository implements ClientRepositoryInterface
      */
     public function getClientEntity(string $clientIdentifier): ?ClientEntityInterface
     {
-        $record = $this->clients->findActive($clientIdentifier);
+        if (Resolver::isAddress($clientIdentifier)) {
+            $record = $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier);
+        } else {
+            $record = $this->clients->findActive($clientIdentifier);
+
+            // The bare identifier of a client that is identified by a metadata document
+            // is never accepted: the client is only reachable through its document.
+            if ($record?->getAttribute('metadata_document_url') !== null) {
+                return null;
+            }
+        }
 
         return $record ? $this->fromClientModel($record) : null;
     }

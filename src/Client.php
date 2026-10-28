@@ -181,6 +181,11 @@ class Client extends Model
      */
     public function firstParty(): bool
     {
+        // A client that is identified by its metadata document is published by a stranger.
+        if (! empty($this->attributes['metadata_document_url'] ?? null)) {
+            return false;
+        }
+
         if (array_key_exists('user_id', $this->attributes)) {
             return empty($this->user_id);
         }

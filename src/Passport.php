@@ -9,6 +9,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
+use Laravel\Passport\ClientMetadata\Configuration as ClientMetadataConfiguration;
 use Laravel\Passport\Contracts\AuthorizationViewResponse;
 use Laravel\Passport\Contracts\DeviceAuthorizationViewResponse;
 use Laravel\Passport\Contracts\DeviceUserCodeViewResponse;
@@ -179,6 +180,13 @@ class Passport
      * @var bool
      */
     public static $registersJsonApiRoutes = false;
+
+    /**
+     * The configuration of Client ID Metadata Documents, or null when they are not accepted.
+     *
+     * @internal
+     */
+    public static ?ClientMetadataConfiguration $clientMetadataConfiguration = null;
 
     /**
      * Enable the implicit grant type.
@@ -705,5 +713,23 @@ class Passport
     public static function withoutCookieEncryption(): void
     {
         static::$decryptsCookies = false;
+    }
+
+    /**
+     * Accept or stop accepting Client ID Metadata Documents.
+     *
+     * Every call replaces the whole configuration: options that are not given return to their defaults.
+     */
+    public static function clientMetadataDocuments(bool $enabled = true): void
+    {
+        static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration : null;
+    }
+
+    /**
+     * Determine if Client ID Metadata Documents are accepted.
+     */
+    public static function clientMetadataDocumentsEnabled(): bool
+    {
+        return static::$clientMetadataConfiguration !== null;
     }
 }

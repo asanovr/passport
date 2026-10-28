@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Str;
 use Laravel\Passport\Bridge\User;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientMetadata\ResolvedClient;
+use Laravel\Passport\ClientMetadata\Resolver;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Contracts\AuthorizationViewResponse;
 use Laravel\Passport\Exceptions\AuthenticationException;
@@ -44,9 +46,16 @@ class AuthorizationController
         ResponseInterface $psrResponse,
         AuthorizationViewResponse $viewResponse
     ): Response|AuthorizationViewResponse {
+        $useFragment = ($psrRequest->getQueryParams()['response_type'] ?? null) === 'token';
+
+        $resolved = $this->withErrorHandling(
+            fn (): ?ResolvedClient => $this->resolveClientMetadata($psrRequest),
+            $useFragment
+        );
+
         $authRequest = $this->withErrorHandling(
             fn (): AuthorizationRequestInterface => $this->server->validateAuthorizationRequest($psrRequest),
-            ($psrRequest->getQueryParams()['response_type'] ?? null) === 'token'
+            $useFragment
         );
 
         $prompt = $request->string('prompt')->explode(' ')->map(trim(...))->filter()->values();
@@ -79,7 +88,7 @@ class AuthorizationController
         $authRequest->setUser(new User($user->getAuthIdentifier()));
 
         $scopes = $this->parseScopes($authRequest);
-        $client = $this->clients->find($authRequest->getClient()->getIdentifier());
+        $client = $resolved?->client ?? $this->clients->find($authRequest->getClient()->getIdentifier());
 
         if ($prompt->doesntContain('consent') &&
             ($client->skipsAuthorization($user, $scopes) || $this->hasGrantedScopes($user, $client, $scopes))) {
@@ -100,6 +109,22 @@ class AuthorizationController
             'request' => $request,
             'authToken' => $authToken,
         ]);
+    }
+
+    /**
+     * Resolve the client behind the request's client id when the id is the address of a metadata document.
+     *
+     * @throws \League\OAuth2\Server\Exception\OAuthServerException
+     */
+    protected function resolveClientMetadata(ServerRequestInterface $psrRequest): ?ResolvedClient
+    {
+        $clientId = $psrRequest->getQueryParams()['client_id'] ?? null;
+
+        if (! is_string($clientId) || ! Resolver::isAddress($clientId)) {
+            return null;
+        }
+
+        return app(Resolver::class)->resolve($clientId, $psrRequest);
     }
 
     /**

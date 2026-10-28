@@ -7,11 +7,18 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
+use Laravel\Passport\ClientMetadata\Document;
 use RuntimeException;
 
 class ClientRepository
 {
+    /**
+     * Indicates if the clients table is known to have the metadata document URL column.
+     */
+    protected bool $hasMetadataDocumentUrlColumn = false;
+
     /**
      * Get a client by the given ID.
      */
@@ -35,6 +42,91 @@ class ClientRepository
         $client = $this->find($id);
 
         return $client && ! $client->revoked ? $client : null;
+    }
+
+    /**
+     * Get the client, revoked or not, that is identified by the given metadata document address.
+     *
+     * @throws \RuntimeException
+     */
+    public function findByMetadataDocumentUrl(string $url): ?Client
+    {
+        if (! $this->hasMetadataDocumentUrlColumn()) {
+            if (Passport::clientMetadataDocumentsEnabled()) {
+                throw new RuntimeException(
+                    'Client metadata documents require the [metadata_document_url] column on the ['.
+                    Passport::client()->getTable().'] table. Publish and run the Passport migrations.'
+                );
+            }
+
+            return null;
+        }
+
+        $client = Passport::client()->newQuery()->where('metadata_document_url', $url)->first();
+
+        // The column is matched case-insensitively by some databases. The address is
+        // an identity, so we confirm that it is the very same string.
+        return $client && $client->getAttribute('metadata_document_url') === $url ? $client : null;
+    }
+
+    /**
+     * Get the active client that is identified by the given metadata document address.
+     */
+    public function findActiveByMetadataDocumentUrl(string $url): ?Client
+    {
+        $client = $this->findByMetadataDocumentUrl($url);
+
+        return $client && ! $client->revoked ? $client : null;
+    }
+
+    /**
+     * Determine if the clients table has the metadata document URL column.
+     */
+    protected function hasMetadataDocumentUrlColumn(): bool
+    {
+        if ($this->hasMetadataDocumentUrlColumn) {
+            return true;
+        }
+
+        $client = Passport::client();
+
+        return $this->hasMetadataDocumentUrlColumn = $client->getConnection()
+            ->getSchemaBuilder()
+            ->hasColumn($client->getTable(), 'metadata_document_url');
+    }
+
+    /**
+     * Store the client for the given metadata document, or bring the existing one up to date.
+     *
+     * @internal
+     */
+    public function syncFromMetadataDocument(Document $document, ?Client $existing = null): Client
+    {
+        $attributes = [
+            'name' => $document->name,
+            'redirect_uris' => $document->redirectUris,
+        ];
+
+        if ($existing === null) {
+            $existing = Model::unguarded(fn (): Client => Passport::client()->newQuery()->createOrFirst(
+                ['metadata_document_url' => $document->url],
+                [
+                    ...$attributes,
+                    'secret' => null,
+                    'provider' => null,
+                    'grant_types' => ['authorization_code', 'refresh_token'],
+                    'revoked' => false,
+                ]
+            ));
+        }
+
+        // A client created by another request in the meantime, or one that already
+        // existed, is revoked or not as it was: a fetch never un-revokes a client.
+        if (! $existing->wasRecentlyCreated && ! $existing->revoked) {
+            $existing->forceFill($attributes)->save();
+        }
+
+        return $existing;
     }
 
     /**
