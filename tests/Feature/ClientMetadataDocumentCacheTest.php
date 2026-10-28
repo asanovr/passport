@@ -2,6 +2,7 @@
 
 namespace Laravel\Passport\Tests\Feature;
 
+use Illuminate\Contracts\Cache\Store;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -93,6 +94,13 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
             'max-age beats Expires' => [['Cache-Control' => 'max-age=120', 'Expires' => $expires(900)], 120],
             'Expires in the past' => [['Expires' => $expires(-3600)], 60],
             'an invalid Expires' => [['Expires' => '0'], 60],
+            'max-age less the Age' => [['Cache-Control' => 'max-age=300', 'Age' => '100'], 200],
+            'an Age beyond max-age' => [['Cache-Control' => 'max-age=300', 'Age' => '400'], 60],
+            'an invalid Age' => [['Cache-Control' => 'max-age=300', 'Age' => 'soon'], 300],
+            'a max-age that is not a number' => [['Cache-Control' => 'max-age=soon'], 60],
+            'a negative max-age' => [['Cache-Control' => 'max-age=-5'], 60],
+            'an empty max-age' => [['Cache-Control' => 'public, max-age='], 60],
+            'an invalid max-age beats Expires' => [['Cache-Control' => 'max-age=soon', 'Expires' => $expires(900)], 60],
         ];
     }
 
@@ -116,6 +124,28 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         $this->assertSame(1, $this->requestsSent());
 
         $this->at($lifetime + 1);
+        $this->authorize()->assertOk();
+        $this->assertSame(2, $this->requestsSent());
+    }
+
+    public function testExpiresIsMeasuredAgainstTheDateOfTheResponse()
+    {
+        // A response that was generated 1000 seconds before it was sent, as one that comes from a
+        // cache, or from a server whose clock is behind, is.
+        $date = $this->start->getTimestamp() - 1000;
+
+        $this->publish(headers: [
+            'Content-Type' => 'application/json',
+            'Date' => gmdate('D, d M Y H:i:s \G\M\T', $date),
+            'Expires' => gmdate('D, d M Y H:i:s \G\M\T', $date + 300),
+        ]);
+
+        $this->authorize()->assertOk();
+        $this->at(299);
+        $this->authorize()->assertOk();
+        $this->assertSame(1, $this->requestsSent());
+
+        $this->at(301);
         $this->authorize()->assertOk();
         $this->assertSame(2, $this->requestsSent());
     }
@@ -291,6 +321,34 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         $lock->release();
         $this->at(31);
         $this->authorize()->assertOk();
+    }
+
+    public function testAnotherAuthorizationWaitsAtLeastAsLongAsTheFetchItWaitsForMayTake()
+    {
+        $this->publish();
+        Sleep::fake();
+        Sleep::syncWithCarbon();
+
+        $lock = Cache::lock('passport:client-metadata:'.hash('sha256', $this->documentUrl).':lock', 60);
+        $this->assertTrue($lock->get());
+
+        $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client');
+
+        // At least the connect timeout and the timeout: the holder may spend that long on the fetch.
+        $this->assertGreaterThanOrEqual(5, $this->start->diffInSeconds(Carbon::now()));
+    }
+
+    public function testADocumentIsFetchedWithoutALockOnACacheStoreThatHasNone()
+    {
+        Cache::extend('plain', fn () => Cache::repository(new CacheStoreWithoutLocks));
+        config(['cache.stores.plain' => ['driver' => 'plain'], 'cache.default' => 'plain']);
+        $this->publish();
+
+        $this->authorize()->assertOk();
+        $this->authorize()->assertOk();
+
+        $this->assertSame(1, $this->requestsSent());
+        $this->assertSame(1, Client::query()->count());
     }
 
     public function testAFreshDocumentIsUsedWithoutWaitingForALockedFetch()
@@ -469,5 +527,84 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         $this->authorize()->assertOk();
 
         $this->assertSame(2, $this->requestsSent());
+    }
+}
+
+class CacheStoreWithoutLocks implements Store
+{
+    /**
+     * The values of the store.
+     *
+     * @var array<string, array{0: mixed, 1: int}>
+     */
+    protected array $values = [];
+
+    public function get($key)
+    {
+        if (! isset($this->values[$key]) || $this->values[$key][1] < Carbon::now()->getTimestamp()) {
+            return null;
+        }
+
+        return $this->values[$key][0];
+    }
+
+    public function many(array $keys)
+    {
+        return array_combine($keys, array_map(fn (string $key) => $this->get($key), $keys));
+    }
+
+    public function put($key, $value, $seconds)
+    {
+        $this->values[$key] = [$value, Carbon::now()->getTimestamp() + $seconds];
+
+        return true;
+    }
+
+    public function putMany(array $values, $seconds)
+    {
+        foreach ($values as $key => $value) {
+            $this->put($key, $value, $seconds);
+        }
+
+        return true;
+    }
+
+    public function increment($key, $value = 1)
+    {
+        return $this->values[$key][0] = ($this->get($key) ?? 0) + $value;
+    }
+
+    public function decrement($key, $value = 1)
+    {
+        return $this->increment($key, -$value);
+    }
+
+    public function forever($key, $value)
+    {
+        return $this->put($key, $value, 315360000);
+    }
+
+    public function touch($key, $seconds)
+    {
+        return false;
+    }
+
+    public function forget($key)
+    {
+        unset($this->values[$key]);
+
+        return true;
+    }
+
+    public function flush()
+    {
+        $this->values = [];
+
+        return true;
+    }
+
+    public function getPrefix()
+    {
+        return '';
     }
 }

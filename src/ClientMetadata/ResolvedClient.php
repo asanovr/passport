@@ -7,7 +7,7 @@ use Laravel\Passport\Client;
 /**
  * @internal
  */
-final class ResolvedClient
+class ResolvedClient
 {
     /**
      * Create a new resolved client instance.

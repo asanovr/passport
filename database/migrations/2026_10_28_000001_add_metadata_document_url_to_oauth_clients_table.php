@@ -23,9 +23,13 @@ return new class extends Migration
         });
 
         if ($filtered) {
-            Schema::getConnection()->statement(
-                'create unique index oauth_clients_metadata_document_url_unique on oauth_clients (metadata_document_url) where metadata_document_url is not null'
-            );
+            $connection = Schema::getConnection();
+
+            $connection->statement(sprintf(
+                'create unique index %s on %s (metadata_document_url) where metadata_document_url is not null',
+                $connection->getSchemaGrammar()->wrap($this->indexName()),
+                $connection->getSchemaGrammar()->wrap($connection->getTablePrefix().'oauth_clients'),
+            ));
         }
     }
 
@@ -34,10 +38,24 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('oauth_clients', function (Blueprint $table) {
-            $table->dropUnique(['metadata_document_url']);
+        $filtered = Schema::getConnection()->getDriverName() === 'sqlsrv';
+
+        Schema::table('oauth_clients', function (Blueprint $table) use ($filtered) {
+            $table->dropUnique($filtered ? $this->indexName() : ['metadata_document_url']);
             $table->dropColumn('metadata_document_url');
         });
+    }
+
+    /**
+     * Get the name of the filtered unique index, as the schema builder names a unique index.
+     */
+    protected function indexName(): string
+    {
+        $connection = Schema::getConnection();
+
+        $prefix = $connection->getConfig('prefix_indexes') ? $connection->getConfig('prefix') : '';
+
+        return strtolower($prefix.'oauth_clients_metadata_document_url_unique');
     }
 
     /**

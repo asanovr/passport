@@ -7,12 +7,12 @@ use Exception;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\TransferException;
 use GuzzleHttp\RequestOptions;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\HttpClientException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Http;
 use Laravel\Passport\Passport;
+use Psr\Http\Message\RequestInterface;
 
 /**
  * @internal
@@ -25,11 +25,20 @@ class Fetcher
     protected const MAXIMUM_NESTING = 8;
 
     /**
+     * Create a new fetcher instance.
+     */
+    public function __construct(
+        protected DocumentValidator $validator,
+        protected Network $network,
+    ) {
+    }
+
+    /**
      * Fetch and validate the document published at the given address.
      *
      * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
      */
-    public function fetch(Address $address): Fetched
+    public function fetch(Address $address): FetchedDocument
     {
         $configuration = Passport::$clientMetadataConfiguration;
 
@@ -73,8 +82,9 @@ class Fetcher
         try {
             $response = Http::accept('application/json')
                 ->withOptions($options)
+                ->withMiddleware($this->ownCurlOptions($options['curl']))
                 ->get($address->url);
-        } catch (ConnectionException|HttpClientException|TransferException $e) {
+        } catch (HttpClientException|TransferException $e) {
             throw new UnusableDocumentException(match (true) {
                 $sink->exceeded => 'the document is larger than the maximum size',
                 str_contains($e->getMessage(), 'cURL error 28') => 'the request for the document timed out',
@@ -88,9 +98,25 @@ class Fetcher
 
         $data = $this->decode($response, $configuration->maximumSize);
 
-        $document = app(DocumentValidator::class)->validate($address, $data);
+        $document = $this->validator->validate($address, $data);
 
-        return new Fetched($document, $this->lifetime($response, $configuration), $data);
+        return new FetchedDocument($document, $this->lifetime($response, $configuration), $data);
+    }
+
+    /**
+     * Get the middleware that sets the cURL options of the request to the given ones, and nothing the HTTP client
+     * has been given for every request.
+     *
+     * The options are merged recursively, so the "curl" option of the application's global options would
+     * otherwise stay, and cURL applies it after the options that make the fetch safe. Global middleware still runs.
+     *
+     * @param  array<int, mixed>  $curl
+     */
+    protected function ownCurlOptions(array $curl): callable
+    {
+        return fn (callable $handler): callable => fn (RequestInterface $request, array $options) => $handler(
+            $request, ['curl' => $curl] + $options
+        );
     }
 
     /**
@@ -117,13 +143,11 @@ class Fetcher
      */
     protected function pin(Address $address): array
     {
-        $network = app(Network::class);
-
-        if (! $network->canPin()) {
+        if (! $this->network->canPin()) {
             throw new UnusableDocumentException('connections cannot be pinned to the vetted addresses');
         }
 
-        $addresses = $network->publicAddresses($address->host);
+        $addresses = $this->network->publicAddresses($address->host);
 
         // A host that is an address needs no pin.
         if (filter_var(trim($address->host, '[]'), FILTER_VALIDATE_IP) !== false) {
@@ -137,6 +161,9 @@ class Fetcher
 
     /**
      * Get the number of seconds the document in the given response stays fresh.
+     *
+     * The freshness is that of RFC 9111: the time the response has already spent in a cache, as the "Age"
+     * header says, is not counted again, and a "max-age" that is not valid makes the response stale.
      */
     protected function lifetime(Response $response, Configuration $configuration): int
     {
@@ -147,27 +174,75 @@ class Fetcher
             default => $this->maxAge($directives) ?? $this->expiresIn($response) ?? $configuration->defaultLifetime,
         };
 
+        if ($lifetime > 0 && $this->hasExplicitFreshness($directives, $response)) {
+            $lifetime = max(0, $lifetime - $this->age($response));
+        }
+
         return max($configuration->minimumLifetime, min($lifetime, $configuration->maximumLifetime));
     }
 
     /**
-     * Get the "max-age" of the given Cache-Control directives.
+     * Determine if the given response says itself how long it stays fresh.
+     *
+     * @param  string[]  $directives
+     */
+    protected function hasExplicitFreshness(array $directives, Response $response): bool
+    {
+        foreach ($directives as $directive) {
+            if (str_starts_with($directive, 'max-age')) {
+                return true;
+            }
+        }
+
+        return $response->hasHeader('Expires') && $this->date($response) !== null;
+    }
+
+    /**
+     * Get the number of seconds the given response has already spent in caches.
+     */
+    protected function age(Response $response): int
+    {
+        $age = trim($response->header('Age'));
+
+        return preg_match('/^\d+$/D', $age) === 1 ? (int) $age : 0;
+    }
+
+    /**
+     * Get the date the given response says it was generated at.
+     */
+    protected function date(Response $response): ?int
+    {
+        if (! $response->hasHeader('Date')) {
+            return null;
+        }
+
+        try {
+            return Date::parse($response->header('Date'))->getTimestamp();
+        } catch (Exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Get the "max-age" of the given Cache-Control directives, which is 0 when its value is not valid.
      *
      * @param  string[]  $directives
      */
     protected function maxAge(array $directives): ?int
     {
         foreach ($directives as $directive) {
-            if (preg_match('/^max-age\s*=\s*"?(\d+)"?$/', $directive, $matches) === 1) {
-                return (int) $matches[1];
+            if (! str_starts_with($directive, 'max-age')) {
+                continue;
             }
+
+            return preg_match('/^max-age\s*=\s*"?(\d+)"?$/D', $directive, $matches) === 1 ? (int) $matches[1] : 0;
         }
 
         return null;
     }
 
     /**
-     * Get the number of seconds until the "Expires" header of the given response.
+     * Get the number of seconds from the "Date" of the given response, or else from now, until its "Expires" header.
      */
     protected function expiresIn(Response $response): ?int
     {
@@ -176,11 +251,13 @@ class Fetcher
         }
 
         try {
-            return max(0, Date::parse($response->header('Expires'))->getTimestamp() - Date::now()->getTimestamp());
+            $expires = Date::parse($response->header('Expires'))->getTimestamp();
         } catch (Exception) {
             // An invalid date means the document has already expired.
             return 0;
         }
+
+        return max(0, $expires - ($this->date($response) ?? Date::now()->getTimestamp()));
     }
 
     /**

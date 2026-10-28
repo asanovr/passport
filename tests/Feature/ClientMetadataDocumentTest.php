@@ -495,6 +495,61 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame('https://legacy.example/app', $entity?->getIdentifier());
     }
 
+    public function testAnHttpsShapedIdOfAnotherKindOfClientAuthorizesAsItAlwaysDidWhileTheModeIsOff()
+    {
+        $this->dropTheColumn();
+        Passport::useClientModel(UrlKeyedClient::class);
+
+        UrlKeyedClient::query()->forceCreate([
+            'id' => 'https://legacy.example/app',
+            'name' => 'Legacy',
+            'secret' => null,
+            'redirect_uris' => ['https://legacy.example/callback'],
+            'grant_types' => ['authorization_code'],
+            'revoked' => false,
+        ]);
+        Log::spy();
+        $this->signIn();
+
+        $this->get('/oauth/authorize?'.$this->authorizationQuery('https://legacy.example/app', [
+            'redirect_uri' => 'https://legacy.example/callback',
+        ]))->assertOk()->assertJsonPath('client.id', 'https://legacy.example/app');
+
+        $this->assertSame(0, $this->requestsSent());
+        Log::shouldNotHaveReceived('warning');
+    }
+
+    public function testAnAddressThatBelongsToADocumentIdentifiedClientStaysRefusedWhileTheModeIsOff()
+    {
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk();
+
+        Passport::clientMetadataDocuments(false);
+        Log::spy();
+
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())
+            ->assertStatus(401)
+            ->assertJsonPath('error', 'invalid_client');
+
+        Log::shouldNotHaveReceived('warning');
+    }
+
+    public function testTheDeviceAuthorizationEndpointNeverFetchesForADocumentAddress()
+    {
+        Passport::clientMetadataDocuments();
+        $this->publish();
+
+        $this->post('/oauth/device/code', [
+            'client_id' => $this->documentUrl,
+            'scope' => 'create',
+        ])->assertStatus(401);
+
+        $this->assertSame(0, $this->requestsSent());
+        $this->assertSame(0, Client::query()->count());
+    }
+
     public function testAnAddressThatADatabaseCannotTellApartFromAnotherIsRefusedAndTheOtherRecordIsLeftAlone()
     {
         // A column that, like MySQL's default, matches addresses regardless of case.

@@ -11,7 +11,7 @@ use Psr\Http\Message\StreamInterface;
  *
  * @internal
  */
-final class LimitedStream implements StreamInterface
+class LimitedStream implements StreamInterface
 {
     use StreamDecoratorTrait;
 

@@ -9,7 +9,7 @@ use JsonSerializable;
 /**
  * What the authorization view knows about a client that is identified by a metadata document.
  */
-final class Consent implements JsonSerializable
+class Consent implements JsonSerializable
 {
     /**
      * Create a new consent value instance.

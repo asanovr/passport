@@ -77,7 +77,45 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
             'an encoded dot segment' => ['https://client.example/oauth/%2e/client.json'],
             'an encoded dot-dot segment' => ['https://client.example/oauth/%2E%2e/client.json'],
             'a half encoded dot-dot segment' => ['https://client.example/oauth/.%2e/client.json'],
+            'an underscore in the host' => ['https://cli_ent.example/oauth/client.json'],
+            'a percent-encoded host' => ['https://client%2eexample/oauth/client.json'],
+            'a sub-delimiter in the host' => ['https://client$.example/oauth/client.json'],
+            'a comma in the host' => ['https://client,example/oauth/client.json'],
+            'a label that starts with a hyphen' => ['https://-client.example/oauth/client.json'],
+            'a label that ends with a hyphen' => ['https://client-.example/oauth/client.json'],
+            'an empty label' => ['https://client..example/oauth/client.json'],
+            'a leading dot' => ['https://.client.example/oauth/client.json'],
+            'a trailing dot' => ['https://client.example./oauth/client.json'],
+            'a label of more than 63 characters' => ['https://'.str_repeat('a', 64).'.example/oauth/client.json'],
+            'a number that is not an IPv4 address' => ['https://127.1/oauth/client.json'],
+            'an IPv4 address that is out of range' => ['https://999.1.1.1/oauth/client.json'],
+            'a hexadecimal IPv4 address' => ['https://0x7f.0.0.1/oauth/client.json'],
+            'a decimal IPv4 address' => ['https://2130706433/oauth/client.json'],
+            'brackets around a name' => ['https://[client.example]/oauth/client.json'],
+            'a malformed IPv6 address' => ['https://[2001:db8::zz]/oauth/client.json'],
+            'an IPv6 address with a zone' => ['https://[fe80::1%25eth0]/oauth/client.json'],
+            'an IPv4 address in brackets' => ['https://[93.184.216.34]/oauth/client.json'],
         ];
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function ipAddresses(): array
+    {
+        return [
+            'an IPv4 address' => ['https://93.184.216.34/oauth/client.json'],
+            'an IPv6 address' => ['https://[2606:2800:220:1:248:1893:25c8:1946]/oauth/client.json'],
+        ];
+    }
+
+    #[DataProvider('ipAddresses')]
+    public function testAnIpAddressIsAnAcceptableHost(string $address)
+    {
+        $this->publish(url: $address);
+
+        $this->authorize($address)->assertOk();
+        $this->assertSame(1, $this->requestsSent());
     }
 
     #[DataProvider('malformedAddresses')]
@@ -440,6 +478,28 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertSame(2, $options['connect_timeout']);
         $this->assertSame(3, $options['timeout']);
         $this->assertArrayHasKey(CURLOPT_RESOLVE, $options['curl']);
+    }
+
+    public function testTheApplicationsGlobalCurlOptionsNeverReachTheTransportButItsMiddlewareRuns()
+    {
+        Http::globalOptions(['curl' => [CURLOPT_SSL_VERIFYPEER => false, CURLOPT_FOLLOWLOCATION => true]]);
+
+        $ran = 0;
+
+        Http::globalMiddleware(function (callable $handler) use (&$ran) {
+            return function ($request, array $options) use ($handler, &$ran) {
+                $ran++;
+
+                return $handler($request, $options);
+            };
+        });
+        $this->publish();
+
+        $this->authorize()->assertOk();
+
+        $this->assertSame(1, $ran);
+        $this->assertHttpsOnly($this->requestOptions[0]);
+        $this->assertSame([], array_diff(array_keys($this->requestOptions[0]['curl']), [CURLOPT_RESOLVE, CURLOPT_PROTOCOLS]));
     }
 }
 

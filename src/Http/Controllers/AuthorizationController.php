@@ -141,6 +141,12 @@ class AuthorizationController
             return null;
         }
 
+        // An application that does not accept metadata documents leaves an id that merely looks like an
+        // address to the authorization server, unless the address belongs to a client that has a document.
+        if (! Passport::clientMetadataDocumentsEnabled() && $this->clients->findByMetadataDocumentUrl($clientId) === null) {
+            return null;
+        }
+
         return app(Resolver::class)->resolve($clientId, $psrRequest, $this->guard->check());
     }
 

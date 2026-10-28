@@ -7,7 +7,7 @@ use InvalidArgumentException;
 /**
  * @internal
  */
-final class Configuration
+class Configuration
 {
     /**
      * Create a new configuration instance.
@@ -27,7 +27,9 @@ final class Configuration
         public readonly int $minimumLifetime = 60,
         public readonly int $maximumLifetime = 86400,
     ) {
-        foreach (compact('connectTimeout', 'timeout', 'maximumSize', 'defaultLifetime', 'minimumLifetime', 'maximumLifetime') as $name => $value) {
+        foreach (compact(
+            'connectTimeout', 'timeout', 'maximumSize', 'defaultLifetime', 'minimumLifetime', 'maximumLifetime'
+        ) as $name => $value) {
             if ($value < 1) {
                 throw new InvalidArgumentException("The client metadata document option [{$name}] must be at least 1.");
             }

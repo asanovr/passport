@@ -3,6 +3,7 @@
 namespace Laravel\Passport\ClientMetadata;
 
 use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Support\Facades\Cache as Store;
 use Illuminate\Support\Facades\Date;
 use Laravel\Passport\Passport;
@@ -12,7 +13,7 @@ use Laravel\Passport\Passport;
  *
  * @internal
  */
-class Cache
+class DocumentCache
 {
     /**
      * The delay after the first failed fetch of an address, in seconds.
@@ -43,10 +44,14 @@ class Cache
     }
 
     /**
-     * Get a lock that serialises the fetches of the given address.
+     * Get a lock that serialises the fetches of the given address, if the cache store has atomic locks.
      */
-    public function lock(string $url): Lock
+    public function lock(string $url): ?Lock
     {
+        if (! Store::getStore() instanceof LockProvider) {
+            return null;
+        }
+
         $configuration = Passport::$clientMetadataConfiguration;
 
         return Store::lock($this->key($url).':lock', $configuration->connectTimeout + $configuration->timeout + 5);

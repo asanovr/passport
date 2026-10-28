@@ -12,7 +12,7 @@ use GuzzleHttp\Psr7\Uri;
  *
  * @internal
  */
-final class Address
+class Address
 {
     /**
      * Create a new address instance.
@@ -70,6 +70,14 @@ final class Address
             throw new UnusableDocumentException('the address has a port');
         }
 
+        $host = str_starts_with($authority, '[')
+            ? substr($authority, 0, (int) strpos($authority, ']') + 1)
+            : explode(':', $authority)[0];
+
+        if (! static::isValidHost($host, $uri->getHost())) {
+            throw new UnusableDocumentException('the address has an invalid host');
+        }
+
         if (str_contains($url, '#')) {
             throw new UnusableDocumentException('the address has a fragment');
         }
@@ -89,5 +97,40 @@ final class Address
         }
 
         return new self($url, $uri->getHost(), $uri->getPort() ?? 443);
+    }
+
+    /**
+     * Determine if the given host, as written in the address, is a DNS name or an IP address that the parser read as is.
+     *
+     * Only these hosts are fetched, so that the host that is vetted is the host the connection is made to,
+     * whichever way a URI parser or the transport reads an unusual one.
+     */
+    protected static function isValidHost(string $host, string $parsed): bool
+    {
+        if (strtolower($host) !== $parsed) {
+            return false;
+        }
+
+        if (str_starts_with($host, '[')) {
+            return str_ends_with($host, ']') &&
+                filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
+        }
+
+        $labels = explode('.', $host);
+
+        foreach ($labels as $label) {
+            if (preg_match('/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/D', $label) !== 1) {
+                return false;
+            }
+        }
+
+        // A host made only of numbers is read as an address by the transport, so it has to be one.
+        $numbers = array_filter($labels, fn (string $label): bool => preg_match('/^(\d+|0x[0-9a-f]*)$/i', $label) === 1);
+
+        if (count($numbers) === count($labels)) {
+            return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+        }
+
+        return true;
     }
 }

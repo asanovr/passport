@@ -35,7 +35,7 @@ class DocumentValidator
      */
     public function validate(Address $address, mixed $data): Document
     {
-        if (! is_array($data) || array_is_list($data) && $data !== []) {
+        if (! is_array($data) || (array_is_list($data) && $data !== [])) {
             throw new UnusableDocumentException('the document is not a JSON object');
         }
 

@@ -7,7 +7,7 @@ namespace Laravel\Passport\ClientMetadata;
  *
  * @internal
  */
-final class Document
+class Document
 {
     /**
      * Create a new document instance.

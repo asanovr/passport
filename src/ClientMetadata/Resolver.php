@@ -24,7 +24,7 @@ class Resolver
     public function __construct(
         protected ClientRepository $clients,
         protected Fetcher $fetcher,
-        protected Cache $cache,
+        protected DocumentCache $cache,
     ) {
     }
 
@@ -40,8 +40,9 @@ class Resolver
      * Resolve the client behind the given document address, fetching its document.
      *
      * @throws \League\OAuth2\Server\Exception\OAuthServerException
+     * @throws \Laravel\Passport\ClientMetadata\SignInRequiredException
      */
-    public function resolve(string $url, ServerRequestInterface $request, bool $authenticated = true): ResolvedClient
+    public function resolve(string $url, ServerRequestInterface $request, bool $authenticated): ResolvedClient
     {
         // An application that does not accept metadata documents answers as it always has.
         if (! Passport::clientMetadataDocumentsEnabled()) {
@@ -117,7 +118,7 @@ class Resolver
      *
      * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
      */
-    protected function applyValidationHook(Fetched $fetched, string $url): void
+    protected function applyValidationHook(FetchedDocument $fetched, string $url): void
     {
         if (! Passport::$clientMetadataDocumentValidator instanceof Closure) {
             return;
@@ -141,10 +142,13 @@ class Resolver
             $this->refuse($request, $url, 'an earlier fetch failed and the next one is delayed');
         }
 
+        $configuration = Passport::$clientMetadataConfiguration;
+
         $lock = $this->cache->lock($url);
 
         try {
-            $lock->block(Passport::$clientMetadataConfiguration->timeout);
+            // The wait covers everything the request that holds the lock may spend on its fetch.
+            $lock?->block($configuration->connectTimeout + $configuration->timeout + 1);
         } catch (LockTimeoutException) {
             $this->refuse($request, $url, 'another fetch of the document did not finish in time');
         }
@@ -174,7 +178,7 @@ class Resolver
 
             return $fetched->document;
         } finally {
-            $lock->release();
+            $lock?->release();
         }
     }
 

@@ -353,7 +353,39 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'localhost' => ['https://localhost/callback'],
             'an IPv4 loopback address' => ['https://127.0.0.1/callback'],
             'an IPv6 loopback address' => ['https://[::1]/callback'],
+            'an IPv6 loopback address written out' => ['https://[0:0:0:0:0:0:0:1]/callback'],
+            'another address of 127.0.0.0/8' => ['https://127.0.0.2/callback'],
+            'the end of 127.0.0.0/8' => ['https://127.255.255.254/callback'],
+            'a name below localhost' => ['https://app.localhost/callback'],
+            'a name below localhost over http' => ['http://app.localhost:4000/callback'],
+            'a name below localhost in capitals' => ['https://APP.Localhost/callback'],
+            'another address of 127.0.0.0/8 over http' => ['http://127.0.0.2:4000/callback'],
         ];
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function hostsThatAreNotLoopback(): array
+    {
+        return [
+            'a name that contains localhost' => ['https://notlocalhost.example/callback'],
+            'a name that starts with localhost' => ['https://localhost.example/callback'],
+            'an address next to 127.0.0.0/8' => ['https://128.0.0.1/callback'],
+            'an address that starts with 127' => ['https://127.0.0.1.example/callback'],
+            'another IPv6 address' => ['https://[::2]/callback'],
+        ];
+    }
+
+    #[DataProvider('hostsThatAreNotLoopback')]
+    public function testOtherHostsDoNotCountAsLoopback(string $redirect)
+    {
+        $this->publish($this->document(['redirect_uris' => [$redirect]]));
+
+        $consent = $this->consent(['redirect_uri' => $redirect]);
+
+        $this->assertFalse($consent['redirectIsLoopback']);
+        $this->assertFalse($consent['allRedirectsAreLoopback']);
     }
 
     #[DataProvider('httpsLoopbackRedirects')]

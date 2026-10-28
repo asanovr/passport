@@ -208,7 +208,8 @@ class Client extends Model
      * Determine if a person's earlier grant to the client may stand in for their consent to a new request.
      *
      * A client that is identified by a metadata document is not re-approved silently when the request sends
-     * the person back to a loopback host, that is, to a program on their own computer, because any such program can borrow the document.
+     * the person back to a loopback host, that is, to a program on their own computer, because any such
+     * program can borrow the document.
      */
     public function mayReuseGrant(?string $redirectUri): bool
     {

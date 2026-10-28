@@ -5,7 +5,7 @@ namespace Laravel\Passport\ClientMetadata;
 /**
  * @internal
  */
-final class Fetched
+class FetchedDocument
 {
     /**
      * Create a new fetched document instance.
@@ -15,7 +15,7 @@ final class Fetched
     public function __construct(
         public readonly Document $document,
         public readonly int $lifetime,
-        public readonly array $data = [],
+        public readonly array $data,
     ) {
     }
 }
