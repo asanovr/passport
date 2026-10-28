@@ -4,6 +4,7 @@ namespace Laravel\Passport\ClientMetadata;
 
 use GuzzleHttp\Psr7\Exception\MalformedUriException;
 use GuzzleHttp\Psr7\Uri;
+use Laravel\Passport\Passport;
 
 /**
  * @internal
@@ -26,13 +27,6 @@ class DocumentValidator
      * @var string[]
      */
     protected const LIST_FIELDS = ['redirect_uris', 'grant_types', 'response_types', 'contacts'];
-
-    /**
-     * The hosts a program on the user's computer is reached at.
-     *
-     * @var string[]
-     */
-    protected const LOOPBACK_HOSTS = ['127.0.0.1', '[::1]', 'localhost'];
 
     /**
      * Validate the decoded document published at the given address.
@@ -140,8 +134,12 @@ class DocumentValidator
                 continue;
             }
 
-            if ($uri->getScheme() !== 'http' || ! in_array($uri->getHost(), static::LOOPBACK_HOSTS, true)) {
+            if (! Loopback::isRedirect($redirectUri)) {
                 throw new UnusableDocumentException('a redirect address is neither https nor plain http on a loopback host');
+            }
+
+            if (! Passport::$clientMetadataConfiguration->allowLoopbackRedirects) {
+                throw new UnusableDocumentException('a redirect address is a loopback address, which is not allowed');
             }
         }
 

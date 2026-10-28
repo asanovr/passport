@@ -5,10 +5,12 @@ namespace Laravel\Passport\Http\Controllers;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Str;
 use Laravel\Passport\Bridge\User;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientMetadata\Consent;
 use Laravel\Passport\ClientMetadata\ResolvedClient;
 use Laravel\Passport\ClientMetadata\Resolver;
 use Laravel\Passport\ClientMetadata\SignInRequiredException;
@@ -96,8 +98,11 @@ class AuthorizationController
         $scopes = $this->parseScopes($authRequest);
         $client = $resolved?->client ?? $this->clients->find($authRequest->getClient()->getIdentifier());
 
+        $redirectUri = $authRequest->getRedirectUri() ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] ?? null;
+
         if ($prompt->doesntContain('consent') &&
-            ($client->skipsAuthorization($user, $scopes) || $this->hasGrantedScopes($user, $client, $scopes))) {
+            ($client->skipsAuthorization($user, $scopes) ||
+                ($client->mayReuseGrant($redirectUri) && $this->hasGrantedScopes($user, $client, $scopes)))) {
             return $this->approveRequest($authRequest, $psrResponse);
         }
 
@@ -114,6 +119,7 @@ class AuthorizationController
             'scopes' => $scopes,
             'request' => $request,
             'authToken' => $authToken,
+            'clientMetadata' => $resolved ? Consent::for($resolved->document, $redirectUri) : null,
         ]);
     }
 

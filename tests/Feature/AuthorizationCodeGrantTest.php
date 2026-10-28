@@ -52,7 +52,7 @@ class AuthorizationCodeGrantTest extends PassportTestCase
         $response->assertSessionHas('authRequest');
         $response->assertSessionHas('authToken');
         $json = $response->json();
-        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken'], array_keys($json));
+        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken', 'clientMetadata'], array_keys($json));
         $this->assertSame(collect(Passport::scopesFor(['create', 'read']))->toArray(), $json['scopes']);
 
         $response = $this->post('/oauth/authorize', ['auth_token' => $json['authToken']]);
@@ -253,7 +253,7 @@ class AuthorizationCodeGrantTest extends PassportTestCase
         $response->assertSessionHas('authRequest');
         $response->assertSessionHas('authToken');
         $json = $response->json();
-        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken'], array_keys($json));
+        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken', 'clientMetadata'], array_keys($json));
         $this->assertSame(collect(Passport::scopesFor(['create', 'update']))->toArray(), $json['scopes']);
     }
 
@@ -278,7 +278,7 @@ class AuthorizationCodeGrantTest extends PassportTestCase
             ->assertSessionHas('authToken')
             ->json();
 
-        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken'], array_keys($json));
+        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken', 'clientMetadata'], array_keys($json));
         $this->assertSame(collect(Passport::scopesFor(['create', 'read']))->toArray(), $json['scopes']);
 
         $this->post('/oauth/authorize', ['auth_token' => $json['authToken']])
@@ -435,7 +435,7 @@ class AuthorizationCodeGrantTest extends PassportTestCase
         $response->assertSessionHas('authRequest');
         $response->assertSessionHas('authToken');
         $json = $response->json();
-        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken'], array_keys($json));
+        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken', 'clientMetadata'], array_keys($json));
         $this->assertSame(collect(Passport::scopesFor(['create', 'read']))->toArray(), $json['scopes']);
     }
 
@@ -555,7 +555,7 @@ class AuthorizationCodeGrantTest extends PassportTestCase
             ->assertSessionHas('authToken')
             ->json();
 
-        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken'], array_keys($json));
+        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken', 'clientMetadata'], array_keys($json));
         $this->assertSame(collect(Passport::scopesFor(['create', 'read']))->toArray(), $json['scopes']);
     }
 

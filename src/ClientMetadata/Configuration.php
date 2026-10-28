@@ -15,6 +15,7 @@ final class Configuration
     public function __construct(
         public readonly bool $requireAuthentication = true,
         public readonly array $allowedHosts = [],
+        public readonly bool $allowLoopbackRedirects = true,
         public readonly bool $allowPrivateNetworks = false,
         public readonly ?string $proxy = null,
         public readonly int $connectTimeout = 2,

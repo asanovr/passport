@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Laravel\Passport\ClientMetadata\Loopback;
 use Laravel\Passport\Database\Factories\ClientFactory;
 
 class Client extends Model
@@ -201,6 +202,21 @@ class Client extends Model
     public function skipsAuthorization(Authenticatable $user, array $scopes): bool
     {
         return false;
+    }
+
+    /**
+     * Determine if a person's earlier grant to the client may stand in for their consent to a new request.
+     *
+     * A client that is identified by a metadata document is not re-approved silently when the request sends
+     * the person back to a program on their own computer, because any such program can borrow the document.
+     */
+    public function mayReuseGrant(?string $redirectUri): bool
+    {
+        if (empty($this->attributes['metadata_document_url'] ?? null)) {
+            return true;
+        }
+
+        return $redirectUri === null || ! Loopback::isRedirect($redirectUri);
     }
 
     /**

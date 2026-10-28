@@ -23,6 +23,7 @@ class Client implements ClientEntityInterface
         bool $isConfidential = false,
         public ?string $provider = null,
         public array $grantTypes = [],
+        public bool $identifiedByMetadataDocument = false,
     ) {
         $this->setIdentifier($identifier);
 

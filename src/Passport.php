@@ -744,6 +744,7 @@ class Passport
         bool $enabled = true,
         bool $requireAuthentication = true,
         array $allowedHosts = [],
+        bool $allowLoopbackRedirects = true,
         bool $allowPrivateNetworks = false,
         ?string $proxy = null,
         int $connectTimeout = 2,
@@ -756,6 +757,7 @@ class Passport
         static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration(
             requireAuthentication: $requireAuthentication,
             allowedHosts: $allowedHosts,
+            allowLoopbackRedirects: $allowLoopbackRedirects,
             allowPrivateNetworks: $allowPrivateNetworks,
             proxy: $proxy,
             connectTimeout: $connectTimeout,

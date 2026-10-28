@@ -192,7 +192,7 @@ class PassportServiceProvider extends ServiceProvider
      */
     protected function buildAuthCodeGrant(): AuthCodeGrant
     {
-        return new AuthCodeGrant(
+        return new Bridge\AuthCodeGrant(
             $this->app->make(Bridge\AuthCodeRepository::class),
             $this->app->make(Bridge\RefreshTokenRepository::class),
             new DateInterval('PT10M')

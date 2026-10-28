@@ -54,7 +54,7 @@ class AuthorizationCodeGrantWithPkceTest extends PassportTestCase
         $response->assertSessionHas('authRequest');
         $response->assertSessionHas('authToken');
         $json = $response->json();
-        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken'], array_keys($json));
+        $this->assertEqualsCanonicalizing(['client', 'user', 'scopes', 'request', 'authToken', 'clientMetadata'], array_keys($json));
         $this->assertSame(collect(Passport::scopesFor(['create', 'read']))->toArray(), $json['scopes']);
 
         $response = $this->post('/oauth/authorize', ['auth_token' => $json['authToken']]);

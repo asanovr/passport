@@ -71,7 +71,8 @@ class ClientRepository implements ClientRepositoryInterface
             $model->redirect_uris,
             $model->confidential(),
             $model->provider,
-            $model->grant_types
+            $model->grant_types,
+            ! empty($model->getAttribute('metadata_document_url'))
         );
     }
 }
