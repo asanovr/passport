@@ -221,6 +221,8 @@ class ClientMetadataDocumentTest extends PassportTestCase
         Passport::clientMetadataDocuments();
         $this->signIn();
 
+        $this->resolveHostsAsPublic();
+
         Http::fake(function () {
             Client::query()->forceCreate([
                 'name' => 'Revoked',
@@ -273,6 +275,8 @@ class ClientMetadataDocumentTest extends PassportTestCase
         Passport::clientMetadataDocuments();
         $this->signIn();
 
+        $this->resolveHostsAsPublic();
+
         Http::fake(function () {
             Client::query()->forceCreate([
                 'name' => 'Raced',
@@ -296,6 +300,8 @@ class ClientMetadataDocumentTest extends PassportTestCase
     {
         Passport::clientMetadataDocuments();
         $this->signIn();
+
+        $this->resolveHostsAsPublic();
 
         Http::fake(function () {
             Client::query()->forceCreate([

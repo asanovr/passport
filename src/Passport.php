@@ -189,6 +189,15 @@ class Passport
     public static ?ClientMetadataConfiguration $clientMetadataConfiguration = null;
 
     /**
+     * The callback that resolves the addresses of the hosts that publish client metadata documents.
+     *
+     * @var (\Closure(string): string[])|null
+     *
+     * @internal
+     */
+    public static ?Closure $clientMetadataHostResolver = null;
+
+    /**
      * Enable the implicit grant type.
      */
     public static function enableImplicitGrant(): void
@@ -723,6 +732,7 @@ class Passport
     public static function clientMetadataDocuments(
         bool $enabled = true,
         bool $allowPrivateNetworks = false,
+        ?string $proxy = null,
         int $connectTimeout = 2,
         int $timeout = 3,
         int $maximumSize = 5120,
@@ -732,6 +742,7 @@ class Passport
     ): void {
         static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration(
             allowPrivateNetworks: $allowPrivateNetworks,
+            proxy: $proxy,
             connectTimeout: $connectTimeout,
             timeout: $timeout,
             maximumSize: $maximumSize,
@@ -747,5 +758,17 @@ class Passport
     public static function clientMetadataDocumentsEnabled(): bool
     {
         return static::$clientMetadataConfiguration !== null;
+    }
+
+    /**
+     * Set the callback that resolves the A and AAAA answers of a host, or null to use the system resolver.
+     *
+     * This is meant for tests: the callback receives a host name and returns its IP addresses.
+     *
+     * @param  (\Closure(string): string[])|null  $callback
+     */
+    public static function resolveClientMetadataHostsUsing(?Closure $callback): void
+    {
+        static::$clientMetadataHostResolver = $callback;
     }
 }

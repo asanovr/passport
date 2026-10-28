@@ -20,6 +20,7 @@ final class Address
     protected function __construct(
         public readonly string $url,
         public readonly string $host,
+        public readonly int $port = 443,
     ) {
     }
 
@@ -87,6 +88,6 @@ final class Address
             }
         }
 
-        return new static($url, $uri->getHost());
+        return new static($url, $uri->getHost(), $uri->getPort() ?? 443);
     }
 }

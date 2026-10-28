@@ -117,7 +117,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertSame($this->documentUrl, $request->url());
         $this->assertSame(['application/json'], $request->header('Accept'));
         $this->assertFalse($options['allow_redirects']);
-        $this->assertSame(CURLPROTO_HTTPS, $options['curl'][CURLOPT_PROTOCOLS]);
+        $this->assertSame(['https'], $options['protocols']);
         $this->assertSame(2, $options['connect_timeout']);
         $this->assertSame(3, $options['timeout']);
     }

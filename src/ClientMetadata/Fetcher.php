@@ -3,6 +3,7 @@
 namespace Laravel\Passport\ClientMetadata;
 
 use Exception;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\TransferException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
@@ -31,21 +32,38 @@ class Fetcher
 
         $sink = new LimitedStream($configuration->maximumSize);
 
+        $options = ['sink' => $sink, 'protocols' => ['https'], 'curl' => []];
+
+        // Guzzle 8 manages the protocols itself and refuses the cURL option that Guzzle 7 needs for it.
+        if (ClientInterface::MAJOR_VERSION < 8) {
+            $options['curl'][CURLOPT_PROTOCOLS] = CURLPROTO_HTTPS;
+        }
+
+        if ($configuration->proxy !== null) {
+            // The proxy resolves the host and decides which addresses it may reach.
+            $options['proxy'] = $configuration->proxy;
+        } else {
+            // An empty proxy keeps the proxy environment variables from redirecting the fetch.
+            $options['proxy'] = '';
+
+            if (! $configuration->allowPrivateNetworks) {
+                $options['curl'] += $this->pin($address);
+            }
+        }
+
         try {
             $response = Http::accept('application/json')
                 ->withoutRedirecting()
                 ->connectTimeout($configuration->connectTimeout)
                 ->timeout($configuration->timeout)
-                ->withOptions([
-                    'sink' => $sink,
-                    'curl' => [CURLOPT_PROTOCOLS => CURLPROTO_HTTPS],
-                ])
+                ->withOptions($options)
                 ->get($address->url);
         } catch (ConnectionException|TransferException $e) {
-            throw new UnusableDocumentException(
-                $sink->exceeded ? 'the document is larger than the maximum size' : 'the document could not be fetched',
-                previous: $e
-            );
+            throw new UnusableDocumentException(match (true) {
+                $sink->exceeded => 'the document is larger than the maximum size',
+                str_contains($e->getMessage(), 'cURL error 28') => 'the request for the document timed out',
+                default => 'the document could not be fetched',
+            }, previous: $e);
         }
 
         if ($response->status() !== 200) {
@@ -57,6 +75,33 @@ class Fetcher
         );
 
         return new Fetched($document, $this->lifetime($response, $configuration));
+    }
+
+    /**
+     * Get the cURL options that pin the connection to the vetted addresses of the host.
+     *
+     * @return array<int, mixed>
+     *
+     * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
+     */
+    protected function pin(Address $address): array
+    {
+        $network = app(Network::class);
+
+        if (! $network->canPin()) {
+            throw new UnusableDocumentException('connections cannot be pinned to the vetted addresses');
+        }
+
+        $addresses = $network->publicAddresses($address->host);
+
+        // A host that is an address needs no pin.
+        if (filter_var(trim($address->host, '[]'), FILTER_VALIDATE_IP) !== false) {
+            return [];
+        }
+
+        return [CURLOPT_RESOLVE => ["{$address->host}:{$address->port}:".implode(',', array_map(
+            fn (string $ip): string => str_contains($ip, ':') ? "[{$ip}]" : $ip, $addresses
+        ))]];
     }
 
     /**

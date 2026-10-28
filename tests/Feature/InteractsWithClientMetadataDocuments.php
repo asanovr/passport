@@ -5,6 +5,8 @@ namespace Laravel\Passport\Tests\Feature;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Laravel\Passport\Passport;
+use Throwable;
 use Workbench\App\Models\User;
 use Workbench\Database\Factories\UserFactory;
 
@@ -27,6 +29,11 @@ trait InteractsWithClientMetadataDocuments
     protected array $published = [];
 
     protected bool $fakesDocuments = false;
+
+    /**
+     * The exception the servers that publish documents fail with, instead of answering.
+     */
+    protected ?Throwable $failure = null;
 
     /**
      * The options of the requests that left the server, in the order they were sent.
@@ -68,13 +75,27 @@ trait InteractsWithClientMetadataDocuments
 
         $this->fakesDocuments = true;
 
+        $this->resolveHostsAsPublic();
+
         Http::fake(function (Request $request, array $options) {
             $this->requestOptions[] = $options;
+
+            if ($this->failure) {
+                throw $this->failure;
+            }
 
             return isset($this->published[$request->url()])
                 ? Http::response(...$this->published[$request->url()])
                 : Http::response('Not Found', 404);
         });
+    }
+
+    /**
+     * Make every host that publishes a document a public one, unless a test already decided otherwise.
+     */
+    protected function resolveHostsAsPublic(): void
+    {
+        Passport::$clientMetadataHostResolver ??= fn (string $host): array => ['93.184.216.34'];
     }
 
     /**
