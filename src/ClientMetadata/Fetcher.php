@@ -70,11 +70,11 @@ class Fetcher
             throw new UnusableDocumentException("the document answered with status {$response->status()}");
         }
 
-        $document = app(DocumentValidator::class)->validate(
-            $address, $this->decode($response, $configuration->maximumSize)
-        );
+        $data = $this->decode($response, $configuration->maximumSize);
 
-        return new Fetched($document, $this->lifetime($response, $configuration));
+        $document = app(DocumentValidator::class)->validate($address, $data);
+
+        return new Fetched($document, $this->lifetime($response, $configuration), $data);
     }
 
     /**

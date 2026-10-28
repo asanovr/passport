@@ -9,8 +9,12 @@ final class Configuration
 {
     /**
      * Create a new configuration instance.
+     *
+     * @param  string[]  $allowedHosts
      */
     public function __construct(
+        public readonly bool $requireAuthentication = true,
+        public readonly array $allowedHosts = [],
         public readonly bool $allowPrivateNetworks = false,
         public readonly ?string $proxy = null,
         public readonly int $connectTimeout = 2,

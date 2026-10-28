@@ -11,12 +11,14 @@ use Laravel\Passport\Bridge\User;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientMetadata\ResolvedClient;
 use Laravel\Passport\ClientMetadata\Resolver;
+use Laravel\Passport\ClientMetadata\SignInRequiredException;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Contracts\AuthorizationViewResponse;
 use Laravel\Passport\Exceptions\AuthenticationException;
 use Laravel\Passport\Exceptions\OAuthServerException;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
+use League\OAuth2\Server\Exception\OAuthServerException as LeagueException;
 use League\OAuth2\Server\Entities\ScopeEntityInterface;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -48,10 +50,14 @@ class AuthorizationController
     ): Response|AuthorizationViewResponse {
         $useFragment = ($psrRequest->getQueryParams()['response_type'] ?? null) === 'token';
 
-        $resolved = $this->withErrorHandling(
-            fn (): ?ResolvedClient => $this->resolveClientMetadata($psrRequest),
-            $useFragment
-        );
+        try {
+            $resolved = $this->withErrorHandling(
+                fn (): ?ResolvedClient => $this->resolveClientMetadata($psrRequest),
+                $useFragment
+            );
+        } catch (SignInRequiredException) {
+            $this->guestMustSignIn($request);
+        }
 
         $authRequest = $this->withErrorHandling(
             fn (): AuthorizationRequestInterface => $this->server->validateAuthorizationRequest($psrRequest),
@@ -124,7 +130,27 @@ class AuthorizationController
             return null;
         }
 
-        return app(Resolver::class)->resolve($clientId, $psrRequest);
+        return app(Resolver::class)->resolve($clientId, $psrRequest, $this->guard->check());
+    }
+
+    /**
+     * Send a guest to sign in before the client's metadata document is fetched.
+     *
+     * The redirect address in the request has not been checked yet, so nothing is ever redirected to it.
+     */
+    protected function guestMustSignIn(Request $request): never
+    {
+        $prompt = $request->string('prompt')->explode(' ')->map(trim(...))->filter();
+
+        if ($prompt->contains('none')) {
+            $exception = new LeagueException(
+                'The authorization server requires end-user authentication.', 9, 'login_required', 401, 'The user is not authenticated'
+            );
+
+            throw new OAuthServerException($exception);
+        }
+
+        $this->promptForLogin($request);
     }
 
     /**

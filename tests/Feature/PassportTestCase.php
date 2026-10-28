@@ -39,6 +39,7 @@ abstract class PassportTestCase extends TestCase
         $this->beforeApplicationDestroyed(function () {
             Passport::clientMetadataDocuments(false);
             Passport::resolveClientMetadataHostsUsing(null);
+            Passport::validateClientMetadataDocumentsUsing(null);
 
             @unlink(self::PUBLIC_KEY);
             @unlink(self::PRIVATE_KEY);

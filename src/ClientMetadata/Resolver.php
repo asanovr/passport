@@ -2,6 +2,7 @@
 
 namespace Laravel\Passport\ClientMetadata;
 
+use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Log;
 use Laravel\Passport\ClientRepository;
@@ -39,7 +40,7 @@ class Resolver
      *
      * @throws \League\OAuth2\Server\Exception\OAuthServerException
      */
-    public function resolve(string $url, ServerRequestInterface $request): ResolvedClient
+    public function resolve(string $url, ServerRequestInterface $request, bool $authenticated = true): ResolvedClient
     {
         if (! Passport::clientMetadataDocumentsEnabled()) {
             $this->refuse($request, $url, 'client metadata documents are not enabled');
@@ -51,13 +52,26 @@ class Resolver
             $this->refuse($request, $url, $e->getMessage());
         }
 
+        if (! $this->isAllowed($address->host)) {
+            $this->refuse($request, $url, 'the host is not in the list of allowed hosts');
+        }
+
         $existing = $this->clients->findByMetadataDocumentUrl($url);
 
         if ($existing?->revoked) {
             $this->refuse($request, $url, 'the client has been revoked');
         }
 
-        $document = $this->cache->get($url) ?? $this->fetch($request, $address);
+        $document = $this->cache->get($url);
+
+        if ($document === null) {
+            // Nobody who is not signed in can make the server fetch a document.
+            if (! $authenticated && Passport::$clientMetadataConfiguration->requireAuthentication) {
+                throw new SignInRequiredException;
+            }
+
+            $document = $this->fetch($request, $address);
+        }
 
         $client = $this->clients->syncFromMetadataDocument($document, $existing);
 
@@ -66,6 +80,48 @@ class Resolver
         }
 
         return new ResolvedClient($client, $document);
+    }
+
+    /**
+     * Determine if documents may be fetched from the given host.
+     */
+    protected function isAllowed(string $host): bool
+    {
+        $allowed = Passport::$clientMetadataConfiguration->allowedHosts;
+
+        if ($allowed === []) {
+            return true;
+        }
+
+        $host = strtolower($host);
+
+        foreach ($allowed as $pattern) {
+            $pattern = strtolower($pattern);
+
+            if ($host === $pattern || (str_starts_with($pattern, '*.') && str_ends_with($host, substr($pattern, 1)))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Let the application refuse a document that Passport has validated.
+     *
+     * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
+     */
+    protected function applyValidationHook(Fetched $fetched, string $url): void
+    {
+        if (! Passport::$clientMetadataDocumentValidator instanceof Closure) {
+            return;
+        }
+
+        $reason = (Passport::$clientMetadataDocumentValidator)($fetched->data, $url);
+
+        if (is_string($reason) && $reason !== '') {
+            throw new UnusableDocumentException("the application refused the document: {$reason}");
+        }
     }
 
     /**
@@ -99,6 +155,8 @@ class Resolver
 
             try {
                 $fetched = $this->fetcher->fetch($address);
+
+                $this->applyValidationHook($fetched, $url);
             } catch (UnusableDocumentException $e) {
                 $this->cache->recordFailure($url);
 

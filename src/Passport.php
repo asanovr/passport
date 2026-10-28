@@ -189,6 +189,15 @@ class Passport
     public static ?ClientMetadataConfiguration $clientMetadataConfiguration = null;
 
     /**
+     * The callback that lets the application refuse a validated client metadata document.
+     *
+     * @var (\Closure(array<string, mixed>, string): (string|null))|null
+     *
+     * @internal
+     */
+    public static ?Closure $clientMetadataDocumentValidator = null;
+
+    /**
      * The callback that resolves the addresses of the hosts that publish client metadata documents.
      *
      * @var (\Closure(string): string[])|null
@@ -728,9 +737,13 @@ class Passport
      * Accept or stop accepting Client ID Metadata Documents.
      *
      * Every call replaces the whole configuration: options that are not given return to their defaults.
+     *
+     * @param  string[]  $allowedHosts
      */
     public static function clientMetadataDocuments(
         bool $enabled = true,
+        bool $requireAuthentication = true,
+        array $allowedHosts = [],
         bool $allowPrivateNetworks = false,
         ?string $proxy = null,
         int $connectTimeout = 2,
@@ -741,6 +754,8 @@ class Passport
         int $maximumLifetime = 86400,
     ): void {
         static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration(
+            requireAuthentication: $requireAuthentication,
+            allowedHosts: $allowedHosts,
             allowPrivateNetworks: $allowPrivateNetworks,
             proxy: $proxy,
             connectTimeout: $connectTimeout,
@@ -770,5 +785,18 @@ class Passport
     public static function resolveClientMetadataHostsUsing(?Closure $callback): void
     {
         static::$clientMetadataHostResolver = $callback;
+    }
+
+    /**
+     * Set the callback that applies the application's own rules to a client metadata document.
+     *
+     * The callback runs after Passport has validated the document, with the document as it was published and its address.
+     * It returns a reason to refuse the document, or null to accept it.
+     *
+     * @param  (\Closure(array<string, mixed>, string): (string|null))|null  $callback
+     */
+    public static function validateClientMetadataDocumentsUsing(?Closure $callback): void
+    {
+        static::$clientMetadataDocumentValidator = $callback;
     }
 }
