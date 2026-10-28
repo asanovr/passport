@@ -726,12 +726,18 @@ class Passport
         int $connectTimeout = 2,
         int $timeout = 3,
         int $maximumSize = 5120,
+        int $defaultLifetime = 600,
+        int $minimumLifetime = 60,
+        int $maximumLifetime = 86400,
     ): void {
         static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration(
             allowPrivateNetworks: $allowPrivateNetworks,
             connectTimeout: $connectTimeout,
             timeout: $timeout,
             maximumSize: $maximumSize,
+            defaultLifetime: $defaultLifetime,
+            minimumLifetime: $minimumLifetime,
+            maximumLifetime: $maximumLifetime,
         ) : null;
     }
 

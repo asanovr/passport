@@ -13,8 +13,6 @@ use Laravel\Passport\Http\Middleware\CheckToken;
 use Laravel\Passport\Passport;
 use Orchestra\Testbench\Concerns\WithLaravelMigrations;
 use RuntimeException;
-use Workbench\App\Models\User;
-use Workbench\Database\Factories\UserFactory;
 
 class ClientMetadataDocumentTest extends PassportTestCase
 {
@@ -33,36 +31,6 @@ class ClientMetadataDocumentTest extends PassportTestCase
         Passport::authorizationView(fn ($params) => $params);
 
         Http::preventStrayRequests();
-    }
-
-    protected function signIn(): User
-    {
-        $this->actingAs($user = UserFactory::new()->create(), 'web');
-
-        return $user;
-    }
-
-    /**
-     * Approve the authorization request of the given address and exchange the code for tokens.
-     *
-     * @return array<string, mixed>
-     */
-    protected function connect(?string $clientId = null): array
-    {
-        $response = $this->get('/oauth/authorize?'.$this->authorizationQuery($clientId))->assertOk();
-
-        $response = $this->post('/oauth/authorize', ['auth_token' => $response->json('authToken')]);
-        $response->assertRedirect();
-
-        parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $params);
-
-        return $this->post('/oauth/token', [
-            'grant_type' => 'authorization_code',
-            'client_id' => $clientId ?? $this->documentUrl,
-            'redirect_uri' => 'https://client.example/callback',
-            'code' => $params['code'],
-            'code_verifier' => $this->codeVerifier,
-        ])->assertOk()->json();
     }
 
     public function testDocumentsAreNotAcceptedByDefault()
@@ -281,6 +249,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk();
         $id = Client::query()->sole()->getKey();
 
+        $this->travel(11)->minutes();
         $this->publish($this->document([
             'client_name' => 'Renamed Agent',
             'redirect_uris' => ['https://client.example/callback', 'https://client.example/other'],

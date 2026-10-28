@@ -5,6 +5,8 @@ namespace Laravel\Passport\Tests\Feature;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Workbench\App\Models\User;
+use Workbench\Database\Factories\UserFactory;
 
 trait InteractsWithClientMetadataDocuments
 {
@@ -111,5 +113,35 @@ trait InteractsWithClientMetadataDocuments
     protected function sentRequests(): array
     {
         return Http::recorded()->map(fn (array $pair): Request => $pair[0])->all();
+    }
+
+    protected function signIn(): User
+    {
+        $this->actingAs($user = UserFactory::new()->create(), 'web');
+
+        return $user;
+    }
+
+    /**
+     * Approve the authorization request of the given address and exchange the code for tokens.
+     *
+     * @return array<string, mixed>
+     */
+    protected function connect(?string $clientId = null): array
+    {
+        $response = $this->get('/oauth/authorize?'.$this->authorizationQuery($clientId))->assertOk();
+
+        $response = $this->post('/oauth/authorize', ['auth_token' => $response->json('authToken')]);
+        $response->assertRedirect();
+
+        parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $params);
+
+        return $this->post('/oauth/token', [
+            'grant_type' => 'authorization_code',
+            'client_id' => $clientId ?? $this->documentUrl,
+            'redirect_uri' => 'https://client.example/callback',
+            'code' => $params['code'],
+            'code_verifier' => $this->codeVerifier,
+        ])->assertOk()->json();
     }
 }

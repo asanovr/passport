@@ -2,6 +2,7 @@
 
 namespace Laravel\Passport\ClientMetadata;
 
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Log;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Exceptions\InvalidClientMetadataException;
@@ -21,6 +22,7 @@ class Resolver
     public function __construct(
         protected ClientRepository $clients,
         protected Fetcher $fetcher,
+        protected Cache $cache,
     ) {
     }
 
@@ -55,11 +57,7 @@ class Resolver
             $this->refuse($request, $url, 'the client has been revoked');
         }
 
-        try {
-            $document = $this->fetcher->fetch($address);
-        } catch (UnusableDocumentException $e) {
-            $this->refuse($request, $url, $e->getMessage());
-        }
+        $document = $this->cache->get($url) ?? $this->fetch($request, $address);
 
         $client = $this->clients->syncFromMetadataDocument($document, $existing);
 
@@ -68,6 +66,52 @@ class Resolver
         }
 
         return new ResolvedClient($client, $document);
+    }
+
+    /**
+     * Fetch the document at the given address, unless another request is fetching it.
+     */
+    protected function fetch(ServerRequestInterface $request, Address $address): Document
+    {
+        $url = $address->url;
+
+        if ($this->cache->isDelayed($url)) {
+            $this->refuse($request, $url, 'an earlier fetch failed and the next one is delayed');
+        }
+
+        $lock = $this->cache->lock($url);
+
+        try {
+            $lock->block(Passport::$clientMetadataConfiguration->timeout);
+        } catch (LockTimeoutException) {
+            $this->refuse($request, $url, 'another fetch of the document did not finish in time');
+        }
+
+        try {
+            // The request that held the lock may have fetched the document, or failed to.
+            if ($document = $this->cache->get($url)) {
+                return $document;
+            }
+
+            if ($this->cache->isDelayed($url)) {
+                $this->refuse($request, $url, 'an earlier fetch failed and the next one is delayed');
+            }
+
+            try {
+                $fetched = $this->fetcher->fetch($address);
+            } catch (UnusableDocumentException $e) {
+                $this->cache->recordFailure($url);
+
+                $this->refuse($request, $url, $e->getMessage());
+            }
+
+            $this->cache->put($fetched->document, $fetched->lifetime);
+            $this->cache->forgetFailures($url);
+
+            return $fetched->document;
+        } finally {
+            $lock->release();
+        }
     }
 
     /**

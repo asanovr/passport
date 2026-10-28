@@ -112,6 +112,7 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
         $this->publish();
         $this->authorize()->assertOk();
 
+        $this->travel(11)->minutes();
         $this->publish($this->document([
             'client_name' => 'Renamed',
             'redirect_uris' => ['https://client.example/elsewhere'],

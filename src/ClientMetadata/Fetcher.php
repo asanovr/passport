@@ -2,9 +2,11 @@
 
 namespace Laravel\Passport\ClientMetadata;
 
+use Exception;
 use GuzzleHttp\Exception\TransferException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Http;
 use Laravel\Passport\Passport;
 
@@ -23,7 +25,7 @@ class Fetcher
      *
      * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
      */
-    public function fetch(Address $address): Document
+    public function fetch(Address $address): Fetched
     {
         $configuration = Passport::$clientMetadataConfiguration;
 
@@ -50,9 +52,59 @@ class Fetcher
             throw new UnusableDocumentException("the document answered with status {$response->status()}");
         }
 
-        return app(DocumentValidator::class)->validate(
+        $document = app(DocumentValidator::class)->validate(
             $address, $this->decode($response, $configuration->maximumSize)
         );
+
+        return new Fetched($document, $this->lifetime($response, $configuration));
+    }
+
+    /**
+     * Get the number of seconds the document in the given response stays fresh.
+     */
+    protected function lifetime(Response $response, Configuration $configuration): int
+    {
+        $directives = array_map(trim(...), explode(',', strtolower($response->header('Cache-Control'))));
+
+        $lifetime = match (true) {
+            in_array('no-store', $directives, true), in_array('no-cache', $directives, true) => 0,
+            default => $this->maxAge($directives) ?? $this->expiresIn($response) ?? $configuration->defaultLifetime,
+        };
+
+        return max($configuration->minimumLifetime, min($lifetime, $configuration->maximumLifetime));
+    }
+
+    /**
+     * Get the "max-age" of the given Cache-Control directives.
+     *
+     * @param  string[]  $directives
+     */
+    protected function maxAge(array $directives): ?int
+    {
+        foreach ($directives as $directive) {
+            if (preg_match('/^max-age\s*=\s*"?(\d+)"?$/', $directive, $matches) === 1) {
+                return (int) $matches[1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get the number of seconds until the "Expires" header of the given response.
+     */
+    protected function expiresIn(Response $response): ?int
+    {
+        if (! $response->hasHeader('Expires')) {
+            return null;
+        }
+
+        try {
+            return max(0, Date::parse($response->header('Expires'))->getTimestamp() - Date::now()->getTimestamp());
+        } catch (Exception) {
+            // An invalid date means the document has already expired.
+            return 0;
+        }
     }
 
     /**
