@@ -43,6 +43,12 @@ class Resolver
             $this->refuse($request, $url, 'client metadata documents are not enabled');
         }
 
+        try {
+            $address = Address::parse($url, Passport::$clientMetadataConfiguration->allowPrivateNetworks);
+        } catch (UnusableDocumentException $e) {
+            $this->refuse($request, $url, $e->getMessage());
+        }
+
         $existing = $this->clients->findByMetadataDocumentUrl($url);
 
         if ($existing?->revoked) {
@@ -50,7 +56,7 @@ class Resolver
         }
 
         try {
-            $document = $this->fetcher->fetch($url);
+            $document = $this->fetcher->fetch($address);
         } catch (UnusableDocumentException $e) {
             $this->refuse($request, $url, $e->getMessage());
         }

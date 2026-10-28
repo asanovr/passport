@@ -22,6 +22,13 @@ trait InteractsWithClientMetadataDocuments
     protected bool $fakesDocuments = false;
 
     /**
+     * The options of the requests that left the server, in the order they were sent.
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    protected array $requestOptions = [];
+
+    /**
      * Get a document published at the given address, with the given fields replaced.
      *
      * @param  array<string, mixed>  $overrides
@@ -44,7 +51,9 @@ trait InteractsWithClientMetadataDocuments
      */
     protected function publish(array|string|null $body = null, int $status = 200, array $headers = ['Content-Type' => 'application/json'], ?string $url = null): void
     {
-        $this->published[$url ?? $this->documentUrl] = [$body ?? $this->document(url: $url), $status, $headers];
+        $body ??= $this->document(url: $url);
+
+        $this->published[$url ?? $this->documentUrl] = [is_array($body) ? json_encode($body) : $body, $status, $headers];
 
         if ($this->fakesDocuments) {
             return;
@@ -52,9 +61,13 @@ trait InteractsWithClientMetadataDocuments
 
         $this->fakesDocuments = true;
 
-        Http::fake(fn (Request $request) => isset($this->published[$request->url()])
-            ? Http::response(...$this->published[$request->url()])
-            : Http::response('Not Found', 404));
+        Http::fake(function (Request $request, array $options) {
+            $this->requestOptions[] = $options;
+
+            return isset($this->published[$request->url()])
+                ? Http::response(...$this->published[$request->url()])
+                : Http::response('Not Found', 404);
+        });
     }
 
     /**

@@ -720,9 +720,19 @@ class Passport
      *
      * Every call replaces the whole configuration: options that are not given return to their defaults.
      */
-    public static function clientMetadataDocuments(bool $enabled = true): void
-    {
-        static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration : null;
+    public static function clientMetadataDocuments(
+        bool $enabled = true,
+        bool $allowPrivateNetworks = false,
+        int $connectTimeout = 2,
+        int $timeout = 3,
+        int $maximumSize = 5120,
+    ): void {
+        static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration(
+            allowPrivateNetworks: $allowPrivateNetworks,
+            connectTimeout: $connectTimeout,
+            timeout: $timeout,
+            maximumSize: $maximumSize,
+        ) : null;
     }
 
     /**
