@@ -438,4 +438,36 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
 
         $this->assertSame(1, $this->requestsSent());
     }
+
+    public function testALoopbackRedirectOfACachedDocumentIsRefusedOnceLoopbackRedirectsAreNotAllowed()
+    {
+        $this->publish($this->document(['redirect_uris' => ['https://client.example/callback', 'http://127.0.0.1/callback']]));
+        $this->authorize()->assertOk();
+
+        Passport::clientMetadataDocuments(allowLoopbackRedirects: false);
+
+        $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client');
+    }
+
+    public function testACacheEntryOfAnotherShapeIsAMissAndTheKeyCarriesAFormatVersion()
+    {
+        $this->publish();
+        $this->authorize()->assertOk();
+
+        $keys = array_filter(
+            array_keys((fn () => $this->storage)->call(Cache::getStore())),
+            fn (string $key): bool => str_contains($key, ':document:')
+        );
+
+        $this->assertNotEmpty($keys);
+
+        foreach ($keys as $key) {
+            $this->assertMatchesRegularExpression('/:document:v\d+:/', $key);
+            Cache::put($key, ['url' => $this->documentUrl, 'surprise' => true], 600);
+        }
+
+        $this->authorize()->assertOk();
+
+        $this->assertSame(2, $this->requestsSent());
+    }
 }

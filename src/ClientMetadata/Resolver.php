@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Exceptions\InvalidClientMetadataException;
 use Laravel\Passport\Passport;
+use League\OAuth2\Server\Exception\OAuthServerException;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
@@ -42,8 +43,9 @@ class Resolver
      */
     public function resolve(string $url, ServerRequestInterface $request, bool $authenticated = true): ResolvedClient
     {
+        // An application that does not accept metadata documents answers as it always has.
         if (! Passport::clientMetadataDocumentsEnabled()) {
-            $this->refuse($request, $url, 'client metadata documents are not enabled');
+            throw OAuthServerException::invalidClient($request);
         }
 
         try {
@@ -73,7 +75,11 @@ class Resolver
             $document = $this->fetch($request, $address);
         }
 
-        $client = $this->clients->syncFromMetadataDocument($document, $existing);
+        try {
+            $client = $this->clients->syncFromMetadataDocument($document, $existing);
+        } catch (UnusableDocumentException $e) {
+            $this->refuse($request, $url, $e->getMessage());
+        }
 
         if ($client->revoked) {
             $this->refuse($request, $url, 'the client has been revoked');

@@ -2,10 +2,13 @@
 
 namespace Laravel\Passport\ClientMetadata;
 
+use Composer\InstalledVersions;
 use Exception;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\TransferException;
+use GuzzleHttp\RequestOptions;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\HttpClientException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Http;
@@ -32,16 +35,32 @@ class Fetcher
 
         $sink = new LimitedStream($configuration->maximumSize);
 
-        $options = ['sink' => $sink, 'protocols' => ['https'], 'curl' => []];
+        // Everything that decides how safe the fetch is, is set here and not left to the application's
+        // global HTTP client options.
+        $options = [
+            'sink' => $sink,
+            'verify' => true,
+            'allow_redirects' => false,
+            'stream' => false,
+            'connect_timeout' => $configuration->connectTimeout,
+            'timeout' => $configuration->timeout,
+            'curl' => [],
+        ];
 
-        // Guzzle 8 manages the protocols itself and refuses the cURL option that Guzzle 7 needs for it.
-        if (ClientInterface::MAJOR_VERSION < 8) {
+        if (defined(RequestOptions::class.'::PROTOCOLS')) {
+            $options['protocols'] = ['https'];
+        } else {
             $options['curl'][CURLOPT_PROTOCOLS] = CURLPROTO_HTTPS;
         }
 
         if ($configuration->proxy !== null) {
             // The proxy resolves the host and decides which addresses it may reach.
             $options['proxy'] = $configuration->proxy;
+
+            // The proxy is for every host, whatever the "NO_PROXY" environment variable says.
+            if ($this->curlReadsProxyEnvironment()) {
+                $options['curl'][CURLOPT_NOPROXY] = '';
+            }
         } else {
             // An empty proxy keeps the proxy environment variables from redirecting the fetch.
             $options['proxy'] = '';
@@ -53,12 +72,9 @@ class Fetcher
 
         try {
             $response = Http::accept('application/json')
-                ->withoutRedirecting()
-                ->connectTimeout($configuration->connectTimeout)
-                ->timeout($configuration->timeout)
                 ->withOptions($options)
                 ->get($address->url);
-        } catch (ConnectionException|TransferException $e) {
+        } catch (ConnectionException|HttpClientException|TransferException $e) {
             throw new UnusableDocumentException(match (true) {
                 $sink->exceeded => 'the document is larger than the maximum size',
                 str_contains($e->getMessage(), 'cURL error 28') => 'the request for the document timed out',
@@ -75,6 +91,21 @@ class Fetcher
         $document = app(DocumentValidator::class)->validate($address, $data);
 
         return new Fetched($document, $this->lifetime($response, $configuration), $data);
+    }
+
+    /**
+     * Determine if cURL itself reads the "NO_PROXY" environment variable for a proxy it has been given.
+     *
+     * Guzzle 7.12 resolves the proxy environment itself and deprecates the cURL option that turns this
+     * off, and Guzzle 8 refuses it. Earlier releases leave it to cURL.
+     */
+    protected function curlReadsProxyEnvironment(): bool
+    {
+        if (ClientInterface::MAJOR_VERSION >= 8) {
+            return false;
+        }
+
+        return version_compare(InstalledVersions::getVersion('guzzlehttp/guzzle') ?? '0', '7.12.0', '<');
     }
 
     /**

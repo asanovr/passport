@@ -25,8 +25,10 @@ class OAuthServerException extends HttpResponseException
 
     /**
      * Create a new OAuthServerException for when login is required.
+     *
+     * Without an authorization request, there is no redirect address that can be trusted to send the error to.
      */
-    public static function loginRequired(AuthorizationRequestInterface $authRequest): static
+    public static function loginRequired(?AuthorizationRequestInterface $authRequest = null): static
     {
         $exception = new LeagueException(
             'The authorization server requires end-user authentication.',
@@ -34,15 +36,17 @@ class OAuthServerException extends HttpResponseException
             'login_required',
             401,
             'The user is not authenticated',
-            $authRequest->getRedirectUri() ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0]
+            $authRequest ? $authRequest->getRedirectUri() ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] : null
         );
 
-        $exception->setPayload([
-            'state' => $authRequest->getState(),
-            ...$exception->getPayload(),
-        ]);
+        if ($authRequest) {
+            $exception->setPayload([
+                'state' => $authRequest->getState(),
+                ...$exception->getPayload(),
+            ]);
+        }
 
-        return new static($exception, $authRequest->getGrantTypeId() === 'implicit');
+        return new static($exception, $authRequest?->getGrantTypeId() === 'implicit');
     }
 
     /**

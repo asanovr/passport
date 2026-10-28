@@ -2,11 +2,18 @@
 
 namespace Laravel\Passport\Tests\Feature;
 
+use Composer\InstalledVersions;
+use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientMetadata\LimitedStream;
+use Laravel\Passport\ClientMetadata\Network;
 use Laravel\Passport\Passport;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Workbench\Database\Factories\UserFactory;
@@ -93,17 +100,6 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertSame($url, $this->sentRequests()[0]->url());
     }
 
-    public function testAllowingPrivateNetworksLiftsNothingElseFromTheAddressRules()
-    {
-        Passport::clientMetadataDocuments(allowPrivateNetworks: true);
-        $this->publish();
-
-        $this->assertRefused($this->authorize('https://client.example:8443/a?b=c'));
-        $this->assertRefused($this->authorize('https://client.example:8443/'));
-        $this->assertRefused($this->authorize('https://user@client.example:8443/a'));
-        $this->assertSame(0, $this->requestsSent());
-    }
-
     public function testTheRequestIsAnHttpsGetThatAcceptsJsonAndNeverFollowsRedirects()
     {
         $this->publish();
@@ -117,7 +113,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertSame($this->documentUrl, $request->url());
         $this->assertSame(['application/json'], $request->header('Accept'));
         $this->assertFalse($options['allow_redirects']);
-        $this->assertSame(['https'], $options['protocols']);
+        $this->assertHttpsOnly($options);
         $this->assertSame(2, $options['connect_timeout']);
         $this->assertSame(3, $options['timeout']);
     }
@@ -291,5 +287,175 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
             fn (string $message, array $context): bool => str_contains($message, 'dot segment') && $context === ['host' => 'client.example']
         )->once();
         Log::shouldNotHaveReceived('warning', fn (string $message): bool => str_contains($message, 'SECRET-BODY'));
+    }
+
+    /**
+     * @return array<string, array{0: bool, 1: string}>
+     */
+    public static function failedErrorAnswers(): array
+    {
+        return [
+            'an error answer that passes the size limit' => [true, 'larger than the maximum size'],
+            'a timeout in the middle of an error answer' => [false, 'could not be fetched'],
+        ];
+    }
+
+    #[DataProvider('failedErrorAnswers')]
+    public function testAnErrorAnswerThatFailsTheTransferIsARefusalAndDelaysTheNextFetch(bool $overflows, string $reason)
+    {
+        Log::spy();
+        $this->resolveHostsAsPublic();
+
+        $attempts = 0;
+
+        // The way the real transport reports an error answer whose body does not go through the sink.
+        Http::fake(function (Request $request, array $options) use ($overflows, &$attempts) {
+            $attempts++;
+            $overflows && $options['sink']->write(str_repeat('x', 20000));
+
+            throw new RequestException(new Response(new PsrResponse(503, [], 'SECRET-BODY')));
+        });
+
+        $this->assertRefused($this->authorize());
+        $this->assertRefused($this->authorize());
+
+        $this->assertSame(1, $attempts);
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message, array $context): bool => str_contains($message, $reason) && $context === ['host' => 'client.example']
+        )->once();
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message): bool => str_contains($message, 'the next one is delayed')
+        )->once();
+        Log::shouldNotHaveReceived('warning', fn (string $message): bool => str_contains($message, 'SECRET-BODY'));
+    }
+
+    public function testWithAProxyNoHostBypassesItWhateverTheGuzzleVersion()
+    {
+        Passport::clientMetadataDocuments(proxy: 'http://proxy.example:3128');
+        $this->publish();
+
+        $this->authorize()->assertOk();
+
+        $options = $this->requestOptions[0];
+
+        $this->assertSame('http://proxy.example:3128', $options['proxy']);
+
+        // Before Guzzle 7.12, cURL reads "NO_PROXY" by itself for a proxy it was given. Later releases
+        // do that in Guzzle, which deprecates the option that stops it, and Guzzle 8 refuses it.
+        $curlReadsTheEnvironment = ClientInterface::MAJOR_VERSION < 8
+            && version_compare(InstalledVersions::getVersion('guzzlehttp/guzzle'), '7.12.0', '<');
+
+        $curlReadsTheEnvironment
+            ? $this->assertSame('', $options['curl'][CURLOPT_NOPROXY])
+            : $this->assertArrayNotHasKey(CURLOPT_NOPROXY, $options['curl']);
+    }
+
+    public function testNoProxyOptionIsPassedWithoutAProxy()
+    {
+        $this->publish();
+
+        $this->authorize()->assertOk();
+
+        $this->assertArrayNotHasKey(CURLOPT_NOPROXY, $this->requestOptions[0]['curl']);
+    }
+
+    public function testHttpsIsEnforcedWithTheOptionTheInstalledGuzzleSupports()
+    {
+        $this->publish();
+
+        $this->authorize()->assertOk();
+
+        $this->assertHttpsOnly($this->requestOptions[0]);
+    }
+
+    public function testTheInstalledGuzzleRaisesNoDeprecationForTheFetch()
+    {
+        $deprecations = [];
+
+        set_error_handler(function (int $level, string $message) use (&$deprecations): bool {
+            $deprecations[] = $message;
+
+            return true;
+        }, E_DEPRECATED | E_USER_DEPRECATED);
+
+        try {
+            // Nothing listens on the port, so the transfer is set up for real and then refused.
+            Http::preventStrayRequests(false);
+            Passport::clientMetadataDocuments(allowPrivateNetworks: true);
+
+            $this->assertRefused($this->authorize('https://127.0.0.1:1/oauth/client.json'));
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([], $deprecations);
+    }
+
+    public function testTheFetchNeverUsesTheStreamHandlerWhichCannotPin()
+    {
+        $this->publish();
+
+        $this->authorize()->assertOk();
+
+        $this->assertFalse($this->requestOptions[0]['stream']);
+    }
+
+    public function testPinningNeedsACurlFunctionGuzzleCanUse()
+    {
+        $this->publish();
+
+        foreach ([['curl_exec'], ['curl_multi_exec'], ['curl_exec', 'curl_multi_exec']] as $missing) {
+            $this->app->bind(Network::class, fn () => new NetworkWithoutFunctions($missing));
+
+            $this->travel(1)->hour();
+
+            count($missing) === 2
+                ? $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client')
+                : $this->authorize()->assertOk();
+        }
+
+        $this->assertSame(2, $this->requestsSent());
+    }
+
+    public function testTheApplicationsGlobalOptionsCannotLoosenTheFetch()
+    {
+        Http::globalOptions([
+            'verify' => false,
+            'allow_redirects' => true,
+            'proxy' => 'http://elsewhere.example:3128',
+            'stream' => true,
+            'connect_timeout' => 60,
+            'timeout' => 60,
+        ]);
+        $this->publish();
+
+        $this->authorize()->assertOk();
+
+        $options = $this->requestOptions[0];
+
+        $this->assertTrue($options['verify']);
+        $this->assertFalse($options['allow_redirects']);
+        $this->assertSame('', $options['proxy']);
+        $this->assertFalse($options['stream']);
+        $this->assertSame(2, $options['connect_timeout']);
+        $this->assertSame(3, $options['timeout']);
+        $this->assertArrayHasKey(CURLOPT_RESOLVE, $options['curl']);
+    }
+}
+
+class NetworkWithoutFunctions extends Network
+{
+    /**
+     * Create a new network instance that lacks the given functions.
+     *
+     * @param  string[]  $missing
+     */
+    public function __construct(protected array $missing)
+    {
+    }
+
+    protected function hasFunction(string $name): bool
+    {
+        return ! in_array($name, $this->missing, true) && parent::hasFunction($name);
     }
 }

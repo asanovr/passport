@@ -6,6 +6,7 @@ use Illuminate\Contracts\Hashing\Hasher;
 use Laravel\Passport\Client as ClientModel;
 use Laravel\Passport\ClientMetadata\Resolver;
 use Laravel\Passport\ClientRepository as ClientModelRepository;
+use Laravel\Passport\Passport;
 use League\OAuth2\Server\Entities\ClientEntityInterface;
 use League\OAuth2\Server\Repositories\ClientRepositoryInterface;
 
@@ -25,14 +26,18 @@ class ClientRepository implements ClientRepositoryInterface
      */
     public function getClientEntity(string $clientIdentifier): ?ClientEntityInterface
     {
-        if (Resolver::isAddress($clientIdentifier)) {
-            $record = $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier);
-        } else {
+        $isAddress = Resolver::isAddress($clientIdentifier);
+
+        $record = $isAddress ? $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier) : null;
+
+        // An identifier that merely looks like an address, in an application that does not
+        // accept metadata documents, is looked up exactly as it always has been.
+        if ($record === null && (! $isAddress || ! Passport::clientMetadataDocumentsEnabled())) {
             $record = $this->clients->findActive($clientIdentifier);
 
             // The bare identifier of a client that is identified by a metadata document
             // is never accepted: the client is only reachable through its document.
-            if ($record?->getAttribute('metadata_document_url') !== null) {
+            if (($record?->getAttributes()['metadata_document_url'] ?? null) !== null) {
                 return null;
             }
         }
@@ -72,7 +77,7 @@ class ClientRepository implements ClientRepositoryInterface
             $model->confidential(),
             $model->provider,
             $model->grant_types,
-            ! empty($model->getAttribute('metadata_document_url'))
+            ! empty($model->getAttributes()['metadata_document_url'] ?? null)
         );
     }
 }

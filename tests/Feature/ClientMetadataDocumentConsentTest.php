@@ -343,6 +343,55 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
         $this->travel(1)->hour();
         $this->authorize()->assertOk();
     }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function httpsLoopbackRedirects(): array
+    {
+        return [
+            'localhost' => ['https://localhost/callback'],
+            'an IPv4 loopback address' => ['https://127.0.0.1/callback'],
+            'an IPv6 loopback address' => ['https://[::1]/callback'],
+        ];
+    }
+
+    #[DataProvider('httpsLoopbackRedirects')]
+    public function testAnHttpsRedirectOnALoopbackHostCountsAsLoopback(string $redirect)
+    {
+        $this->publish($this->document(['redirect_uris' => [$redirect]]));
+
+        $consent = $this->consent(['redirect_uri' => $redirect]);
+
+        $this->assertTrue($consent['redirectIsLoopback']);
+        $this->assertTrue($consent['allRedirectsAreLoopback']);
+    }
+
+    #[DataProvider('httpsLoopbackRedirects')]
+    public function testAnHttpsRedirectOnALoopbackHostIsNeverApprovedSilently(string $redirect)
+    {
+        $this->publish($this->document(['redirect_uris' => ['https://client.example/callback', $redirect]]));
+        $this->connect(redirectUri: $redirect);
+
+        $this->authorize(['redirect_uri' => $redirect])->assertOk()->assertSessionHas('authRequest');
+    }
+
+    #[DataProvider('httpsLoopbackRedirects')]
+    public function testADocumentListingAnHttpsLoopbackRedirectIsRefusedWhenLoopbackRedirectsAreNotAllowed(string $redirect)
+    {
+        Passport::clientMetadataDocuments(allowLoopbackRedirects: false);
+        $this->publish($this->document(['redirect_uris' => ['https://client.example/callback', $redirect]]));
+
+        $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client');
+        $this->assertSame(0, Client::query()->count());
+    }
+
+    public function testAnHttpsRedirectOnAnotherHostIsNotLoopback()
+    {
+        $this->publish($this->document(['redirect_uris' => ['https://localhost.example/callback']]));
+
+        $this->assertFalse($this->consent(['redirect_uri' => 'https://localhost.example/callback'])['redirectIsLoopback']);
+    }
 }
 
 class SkipsAuthorizationClient extends Client

@@ -212,7 +212,7 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
             ['client.example:443:93.184.216.34,[2606:4700::1111]'],
             $this->requestOptions[0]['curl'][CURLOPT_RESOLVE]
         );
-        $this->assertSame(['https'], $this->requestOptions[0]['protocols']);
+        $this->assertHttpsOnly($this->requestOptions[0]);
     }
 
     public function testNothingIsFetchedWhenPinningIsNotAvailable()
@@ -220,13 +220,7 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
         $this->publish();
         $this->resolveTo(['93.184.216.34']);
 
-        $this->app->bind(Network::class, fn () => new class extends Network
-        {
-            public function canPin(): bool
-            {
-                return false;
-            }
-        });
+        $this->app->bind(Network::class, UnpinnableNetwork::class);
 
         $this->assertRefused($this->authorize());
         $this->assertSame(0, $this->requestsSent());
@@ -316,5 +310,13 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
                 fn (string $message, array $context): bool => str_contains($message, $reason) && $context === ['host' => 'client.example']
             )->once();
         }
+    }
+}
+
+class UnpinnableNetwork extends Network
+{
+    public function canPin(): bool
+    {
+        return false;
     }
 }

@@ -2,22 +2,25 @@
 
 namespace Laravel\Passport;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 use Laravel\Passport\ClientMetadata\Document;
+use Laravel\Passport\ClientMetadata\UnusableDocumentException;
 use RuntimeException;
 
 class ClientRepository
 {
     /**
-     * Indicates if the clients table is known to have the metadata document URL column.
+     * Indicates if the clients table has the metadata document URL column, once that has been checked.
      */
-    protected bool $hasMetadataDocumentUrlColumn = false;
+    protected ?bool $hasMetadataDocumentUrlColumn = null;
 
     /**
      * Get a client by the given ID.
@@ -51,18 +54,15 @@ class ClientRepository
      */
     public function findByMetadataDocumentUrl(string $url): ?Client
     {
-        if (! $this->hasMetadataDocumentUrlColumn()) {
-            if (Passport::clientMetadataDocumentsEnabled()) {
-                throw new RuntimeException(
-                    'Client metadata documents require the [metadata_document_url] column on the ['.
-                    Passport::client()->getTable().'] table. Publish and run the Passport migrations.'
-                );
-            }
-
+        // An application that accepts metadata documents needs the column, so there is nothing to check.
+        // Any other application only has the column if it has chosen to run the migration.
+        if (! Passport::clientMetadataDocumentsEnabled() && ! $this->hasMetadataDocumentUrlColumn()) {
             return null;
         }
 
-        $client = Passport::client()->newQuery()->where('metadata_document_url', $url)->first();
+        $client = $this->explainingAMissingColumn(
+            fn () => Passport::client()->newQuery()->where('metadata_document_url', $url)->first()
+        );
 
         // The column is matched case-insensitively by some databases. The address is
         // an identity, so we confirm that it is the very same string.
@@ -80,12 +80,38 @@ class ClientRepository
     }
 
     /**
+     * Run the given query, and explain what is missing when it fails because the clients table has no metadata document URL column.
+     *
+     * @template TReturn
+     *
+     * @param  \Closure(): TReturn  $callback
+     * @return TReturn
+     *
+     * @throws \RuntimeException
+     */
+    protected function explainingAMissingColumn(Closure $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (QueryException $e) {
+            if (! Passport::clientMetadataDocumentsEnabled() || $this->hasMetadataDocumentUrlColumn()) {
+                throw $e;
+            }
+
+            throw new RuntimeException(
+                'Client metadata documents require the [metadata_document_url] column on the ['.
+                Passport::client()->getTable().'] table. Publish and run the Passport migrations.', previous: $e
+            );
+        }
+    }
+
+    /**
      * Determine if the clients table has the metadata document URL column.
      */
     protected function hasMetadataDocumentUrlColumn(): bool
     {
-        if ($this->hasMetadataDocumentUrlColumn) {
-            return true;
+        if ($this->hasMetadataDocumentUrlColumn !== null) {
+            return $this->hasMetadataDocumentUrlColumn;
         }
 
         $client = Passport::client();
@@ -99,6 +125,8 @@ class ClientRepository
      * Store the client for the given metadata document, or bring the existing one up to date.
      *
      * @internal
+     *
+     * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
      */
     public function syncFromMetadataDocument(Document $document, ?Client $existing = null): Client
     {
@@ -108,16 +136,24 @@ class ClientRepository
         ];
 
         if ($existing === null) {
-            $existing = Model::unguarded(fn (): Client => Passport::client()->newQuery()->createOrFirst(
-                ['metadata_document_url' => $document->url],
-                [
-                    ...$attributes,
-                    'secret' => null,
-                    'provider' => null,
-                    'grant_types' => ['authorization_code', 'refresh_token'],
-                    'revoked' => false,
-                ]
-            ));
+            $existing = $this->explainingAMissingColumn(
+                fn (): Client => Model::unguarded(fn (): Client => Passport::client()->newQuery()->createOrFirst(
+                    ['metadata_document_url' => $document->url],
+                    [
+                        ...$attributes,
+                        'secret' => null,
+                        'provider' => null,
+                        'grant_types' => ['authorization_code', 'refresh_token'],
+                        'revoked' => false,
+                    ]
+                ))
+            );
+
+            // A case-insensitive column hands back the record of another address that it cannot tell
+            // apart from this one. That record belongs to another client, so it is never touched.
+            if ($existing->getAttribute('metadata_document_url') !== $document->url) {
+                throw new UnusableDocumentException('the address is held by a client whose address differs only in case');
+            }
         }
 
         // A client created by another request in the meantime, or one that already

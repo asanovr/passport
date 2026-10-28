@@ -2,6 +2,8 @@
 
 namespace Laravel\Passport\ClientMetadata;
 
+use InvalidArgumentException;
+
 /**
  * @internal
  */
@@ -25,5 +27,16 @@ final class Configuration
         public readonly int $minimumLifetime = 60,
         public readonly int $maximumLifetime = 86400,
     ) {
+        foreach (compact('connectTimeout', 'timeout', 'maximumSize', 'defaultLifetime', 'minimumLifetime', 'maximumLifetime') as $name => $value) {
+            if ($value < 1) {
+                throw new InvalidArgumentException("The client metadata document option [{$name}] must be at least 1.");
+            }
+        }
+
+        if ($minimumLifetime > $maximumLifetime) {
+            throw new InvalidArgumentException(
+                'The minimum lifetime of a client metadata document must not be greater than its maximum lifetime.'
+            );
+        }
     }
 }

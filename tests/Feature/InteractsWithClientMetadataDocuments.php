@@ -2,6 +2,7 @@
 
 namespace Laravel\Passport\Tests\Feature;
 
+use GuzzleHttp\RequestOptions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -119,6 +120,24 @@ trait InteractsWithClientMetadataDocuments
     }
 
     /**
+     * Assert that the options of a request that left the server allow https and nothing else.
+     *
+     * Guzzle has an option for it since 7.11, and a cURL option does it before that.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    protected function assertHttpsOnly(array $options): void
+    {
+        if (defined(RequestOptions::class.'::PROTOCOLS')) {
+            $this->assertSame(['https'], $options['protocols']);
+            $this->assertArrayNotHasKey(CURLOPT_PROTOCOLS, $options['curl']);
+        } else {
+            $this->assertArrayNotHasKey('protocols', $options);
+            $this->assertSame(CURLPROTO_HTTPS, $options['curl'][CURLOPT_PROTOCOLS]);
+        }
+    }
+
+    /**
      * Get the number of requests that left the server.
      */
     protected function requestsSent(): int
@@ -148,9 +167,9 @@ trait InteractsWithClientMetadataDocuments
      *
      * @return array<string, mixed>
      */
-    protected function connect(?string $clientId = null): array
+    protected function connect(?string $clientId = null, string $redirectUri = 'https://client.example/callback'): array
     {
-        $response = $this->get('/oauth/authorize?'.$this->authorizationQuery($clientId))->assertOk();
+        $response = $this->get('/oauth/authorize?'.$this->authorizationQuery($clientId, ['redirect_uri' => $redirectUri]))->assertOk();
 
         $response = $this->post('/oauth/authorize', ['auth_token' => $response->json('authToken')]);
         $response->assertRedirect();
@@ -160,7 +179,7 @@ trait InteractsWithClientMetadataDocuments
         return $this->post('/oauth/token', [
             'grant_type' => 'authorization_code',
             'client_id' => $clientId ?? $this->documentUrl,
-            'redirect_uri' => 'https://client.example/callback',
+            'redirect_uri' => $redirectUri,
             'code' => $params['code'],
             'code_verifier' => $this->codeVerifier,
         ])->assertOk()->json();

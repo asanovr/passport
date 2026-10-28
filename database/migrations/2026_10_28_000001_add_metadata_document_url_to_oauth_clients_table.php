@@ -11,9 +11,22 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('oauth_clients', function (Blueprint $table) {
-            $table->string('metadata_document_url')->nullable()->unique()->after('provider');
+        // SQL Server treats every NULL in a unique index as equal, so there the index leaves them out.
+        $filtered = Schema::getConnection()->getDriverName() === 'sqlsrv';
+
+        Schema::table('oauth_clients', function (Blueprint $table) use ($filtered) {
+            $column = $table->string('metadata_document_url', 255)->nullable()->after('provider');
+
+            if (! $filtered) {
+                $column->unique();
+            }
         });
+
+        if ($filtered) {
+            Schema::getConnection()->statement(
+                'create unique index oauth_clients_metadata_document_url_unique on oauth_clients (metadata_document_url) where metadata_document_url is not null'
+            );
+        }
     }
 
     /**

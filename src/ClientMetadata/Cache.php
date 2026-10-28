@@ -29,7 +29,7 @@ class Cache
      */
     public function get(string $url): ?Document
     {
-        $data = Store::get($this->key($url));
+        $data = Store::get($this->documentKey($url));
 
         return is_array($data) ? Document::fromArray($data) : null;
     }
@@ -39,7 +39,7 @@ class Cache
      */
     public function put(Document $document, int $lifetime): void
     {
-        Store::put($this->key($document->url), $document->toArray(), $lifetime);
+        Store::put($this->documentKey($document->url), $document->toArray(), $lifetime);
     }
 
     /**
@@ -85,6 +85,22 @@ class Cache
     public function forgetFailures(string $url): void
     {
         Store::forget($this->key($url).':failures');
+    }
+
+    /**
+     * Get the cache key of the validated document of the given address.
+     *
+     * The key carries the settings that decide whether a document is valid, so that a document
+     * that was validated under other settings is never used.
+     */
+    protected function documentKey(string $url): string
+    {
+        $configuration = Passport::$clientMetadataConfiguration;
+
+        return $this->key($url).':document:v1:'.hash('xxh128', json_encode([
+            $configuration->allowLoopbackRedirects,
+            $configuration->allowPrivateNetworks,
+        ]));
     }
 
     /**

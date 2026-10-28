@@ -130,15 +130,13 @@ class DocumentValidator
                 throw new UnusableDocumentException('a redirect address is relative, has no host or has user information');
             }
 
-            if ($uri->getScheme() === 'https') {
-                continue;
-            }
+            $loopback = Loopback::isRedirect($redirectUri);
 
-            if (! Loopback::isRedirect($redirectUri)) {
+            if ($uri->getScheme() !== 'https' && ! ($uri->getScheme() === 'http' && $loopback)) {
                 throw new UnusableDocumentException('a redirect address is neither https nor plain http on a loopback host');
             }
 
-            if (! Passport::$clientMetadataConfiguration->allowLoopbackRedirects) {
+            if ($loopback && ! Passport::$clientMetadataConfiguration->allowLoopbackRedirects) {
                 throw new UnusableDocumentException('a redirect address is a loopback address, which is not allowed');
             }
         }

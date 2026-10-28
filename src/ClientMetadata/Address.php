@@ -17,7 +17,7 @@ final class Address
     /**
      * Create a new address instance.
      */
-    protected function __construct(
+    private function __construct(
         public readonly string $url,
         public readonly string $host,
         public readonly int $port = 443,
@@ -29,7 +29,7 @@ final class Address
      *
      * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
      */
-    public static function parse(string $url, bool $allowPort = false): static
+    public static function parse(string $url, bool $allowPort = false): self
     {
         if (! str_starts_with($url, 'https://')) {
             throw new UnusableDocumentException('the address is not an https address');
@@ -88,6 +88,6 @@ final class Address
             }
         }
 
-        return new static($url, $uri->getHost(), $uri->getPort() ?? 443);
+        return new self($url, $uri->getHost(), $uri->getPort() ?? 443);
     }
 }

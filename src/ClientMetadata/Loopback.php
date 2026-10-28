@@ -18,7 +18,7 @@ final class Loopback
     public const HOSTS = ['127.0.0.1', '[::1]', 'localhost'];
 
     /**
-     * Determine if the given redirect address is plain http on a loopback host.
+     * Determine if the given redirect address is on a loopback host, whatever its scheme.
      */
     public static function isRedirect(string $uri): bool
     {
@@ -28,6 +28,6 @@ final class Loopback
             return false;
         }
 
-        return $uri->getScheme() === 'http' && in_array($uri->getHost(), static::HOSTS, true);
+        return in_array($uri->getHost(), static::HOSTS, true);
     }
 }

@@ -739,6 +739,8 @@ class Passport
      * Every call replaces the whole configuration: options that are not given return to their defaults.
      *
      * @param  string[]  $allowedHosts
+     *
+     * @throws \InvalidArgumentException
      */
     public static function clientMetadataDocuments(
         bool $enabled = true,

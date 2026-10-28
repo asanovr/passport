@@ -9,6 +9,9 @@ use League\OAuth2\Server\Entities\ClientEntityInterface;
 use League\OAuth2\Server\Grant\AuthCodeGrant as LeagueAuthCodeGrant;
 use Psr\Http\Message\ServerRequestInterface;
 
+/**
+ * @internal
+ */
 class AuthCodeGrant extends LeagueAuthCodeGrant
 {
     /**

@@ -20,7 +20,6 @@ use Laravel\Passport\Exceptions\AuthenticationException;
 use Laravel\Passport\Exceptions\OAuthServerException;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
-use League\OAuth2\Server\Exception\OAuthServerException as LeagueException;
 use League\OAuth2\Server\Entities\ScopeEntityInterface;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -52,20 +51,6 @@ class AuthorizationController
     ): Response|AuthorizationViewResponse {
         $useFragment = ($psrRequest->getQueryParams()['response_type'] ?? null) === 'token';
 
-        try {
-            $resolved = $this->withErrorHandling(
-                fn (): ?ResolvedClient => $this->resolveClientMetadata($psrRequest),
-                $useFragment
-            );
-        } catch (SignInRequiredException) {
-            $this->guestMustSignIn($request);
-        }
-
-        $authRequest = $this->withErrorHandling(
-            fn (): AuthorizationRequestInterface => $this->server->validateAuthorizationRequest($psrRequest),
-            $useFragment
-        );
-
         $prompt = $request->string('prompt')->explode(' ')->map(trim(...))->filter()->values();
 
         // If the prompt parameter includes "none", all other prompt values will be ignored
@@ -74,6 +59,23 @@ class AuthorizationController
         if ($prompt->contains('none')) {
             $prompt = collect(['none']);
         }
+
+        try {
+            $resolved = $this->withErrorHandling(
+                fn (): ?ResolvedClient => $this->resolveClientMetadata($psrRequest),
+                $useFragment
+            );
+        } catch (SignInRequiredException) {
+            // The redirect address in the request has not been checked yet, so nothing is ever redirected to it.
+            $prompt->contains('none')
+                ? throw OAuthServerException::loginRequired()
+                : $this->promptForLogin($request);
+        }
+
+        $authRequest = $this->withErrorHandling(
+            fn (): AuthorizationRequestInterface => $this->server->validateAuthorizationRequest($psrRequest),
+            $useFragment
+        );
 
         if ($this->guard->guest()) {
             $prompt->contains('none')
@@ -132,31 +134,14 @@ class AuthorizationController
     {
         $clientId = $psrRequest->getQueryParams()['client_id'] ?? null;
 
-        if (! is_string($clientId) || ! Resolver::isAddress($clientId)) {
+        // Only the authorization code flow identifies a client by a document: the other
+        // response types are never answered with a fetch, nor with a record.
+        if (($psrRequest->getQueryParams()['response_type'] ?? null) !== 'code' ||
+            ! is_string($clientId) || ! Resolver::isAddress($clientId)) {
             return null;
         }
 
         return app(Resolver::class)->resolve($clientId, $psrRequest, $this->guard->check());
-    }
-
-    /**
-     * Send a guest to sign in before the client's metadata document is fetched.
-     *
-     * The redirect address in the request has not been checked yet, so nothing is ever redirected to it.
-     */
-    protected function guestMustSignIn(Request $request): never
-    {
-        $prompt = $request->string('prompt')->explode(' ')->map(trim(...))->filter();
-
-        if ($prompt->contains('none')) {
-            $exception = new LeagueException(
-                'The authorization server requires end-user authentication.', 9, 'login_required', 401, 'The user is not authenticated'
-            );
-
-            throw new OAuthServerException($exception);
-        }
-
-        $this->promptForLogin($request);
     }
 
     /**

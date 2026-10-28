@@ -63,7 +63,17 @@ class Network
      */
     public function canPin(): bool
     {
-        return extension_loaded('curl') && defined('CURLOPT_RESOLVE');
+        // Guzzle only uses cURL, and so only honours a pin, when one of these functions exists.
+        return extension_loaded('curl') && defined('CURLOPT_RESOLVE') &&
+            ($this->hasFunction('curl_exec') || $this->hasFunction('curl_multi_exec'));
+    }
+
+    /**
+     * Determine if the given function can be called.
+     */
+    protected function hasFunction(string $name): bool
+    {
+        return function_exists($name);
     }
 
     /**

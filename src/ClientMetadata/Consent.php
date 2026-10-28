@@ -20,8 +20,8 @@ final class Consent implements JsonSerializable
      * @param  string|null  $clientUri  The client's website as published, if any.
      * @param  bool  $clientUriMatchesOrigin  Whether the website has the same origin as the document; false when there is none.
      * @param  string|null  $logoUri  The address of the client's logo as published, if any. Never hotlink it blindly.
-     * @param  bool  $redirectIsLoopback  Whether the redirect address of this request is plain http on a loopback host.
-     * @param  bool  $allRedirectsAreLoopback  Whether every redirect address the document lists is such an address.
+     * @param  bool  $redirectIsLoopback  Whether the redirect address of this request is on a loopback host.
+     * @param  bool  $allRedirectsAreLoopback  Whether every redirect address the document lists is on a loopback host.
      */
     public function __construct(
         public readonly string $url,
