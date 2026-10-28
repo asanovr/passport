@@ -51,7 +51,7 @@ class Fetcher
         }
 
         return app(DocumentValidator::class)->validate(
-            $address->url, $this->decode($response, $configuration->maximumSize)
+            $address, $this->decode($response, $configuration->maximumSize)
         );
     }
 

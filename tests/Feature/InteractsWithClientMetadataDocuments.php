@@ -8,6 +8,11 @@ use Illuminate\Support\Str;
 
 trait InteractsWithClientMetadataDocuments
 {
+    /**
+     * The value that leaves a field out of a document.
+     */
+    protected const MISSING = '@@missing@@';
+
     protected string $documentUrl = 'https://client.example/oauth/client.json';
 
     protected string $codeVerifier;
@@ -36,11 +41,11 @@ trait InteractsWithClientMetadataDocuments
      */
     protected function document(array $overrides = [], ?string $url = null): array
     {
-        return array_replace([
+        return array_filter(array_replace([
             'client_id' => $url ?? $this->documentUrl,
             'client_name' => 'Example Agent',
             'redirect_uris' => ['https://client.example/callback'],
-        ], $overrides);
+        ], $overrides), fn (mixed $value): bool => $value !== static::MISSING);
     }
 
     /**
