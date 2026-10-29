@@ -235,6 +235,16 @@ class ClientMetadataDocumentPolicyTest extends PassportTestCase
         $this->authorize()->assertOk()->assertJsonPath('client.name', 'Renamed');
     }
 
+    public function testAnEmptyStringFromTheHookProceeds()
+    {
+        Passport::validateClientMetadataDocumentsUsing(fn (array $document) => '');
+        $this->publish();
+        $this->actingAs(UserFactory::new()->create(), 'web');
+
+        $this->authorize()->assertOk();
+        $this->assertSame(1, Client::query()->count());
+    }
+
     public function testReturningNothingFromTheHookProceeds()
     {
         Passport::validateClientMetadataDocumentsUsing(fn (array $document) => null);

@@ -5,6 +5,7 @@ namespace Laravel\Passport\Tests\Feature;
 use Composer\InstalledVersions;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Psr7\Response as PsrResponse;
+use GuzzleHttp\Psr7\Uri;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\RequestException;
@@ -94,7 +95,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
             'brackets around a name' => ['https://[client.example]/oauth/client.json'],
             'a malformed IPv6 address' => ['https://[2001:db8::zz]/oauth/client.json'],
             'an IPv6 address with a zone' => ['https://[fe80::1%25eth0]/oauth/client.json'],
-            'an IPvFuture host' => ['https://[v1.fe80::a+en1]/oauth/client.json'],
+            'an IPvFuture host' => ['https://[v1.x]/oauth/client.json'],
             'an IPv4 address in brackets' => ['https://[93.184.216.34]/oauth/client.json'],
         ];
     }
@@ -107,6 +108,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         return [
             'an IPv4 address' => ['https://93.184.216.34/oauth/client.json'],
             'an IPv6 address' => ['https://[2606:2800:220:1:248:1893:25c8:1946]/oauth/client.json'],
+            'an IPv6 address that is not written in its canonical form' => ['https://[2606:4700:0:0:0:0:0:1]/oauth/client.json'],
         ];
     }
 
@@ -114,6 +116,9 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
     public function testAnIpAddressIsAnAcceptableHost(string $address)
     {
         $this->publish(url: $address);
+
+        // The HTTP client may send the address in another notation, such as the canonical form of an IPv6 address.
+        $this->published[(string) new Uri($address)] = $this->published[$address];
 
         $this->authorize($address)->assertOk();
         $this->assertSame(1, $this->requestsSent());

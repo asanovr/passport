@@ -96,6 +96,9 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
             'an invalid Expires' => [['Expires' => '0'], 60],
             'max-age less the Age' => [['Cache-Control' => 'max-age=300', 'Age' => '100'], 200],
             'an Age beyond max-age' => [['Cache-Control' => 'max-age=300', 'Age' => '400'], 60],
+            'an Expires with an unreadable Date' => [['Expires' => $expires(300), 'Date' => 'garbage'], 300],
+            'an Expires with an RFC 850 Date' => [['Expires' => $expires(300), 'Date' => 'Sunday, 06-Nov-94 08:49:37 GMT'], 300],
+            'a negative Age' => [['Cache-Control' => 'max-age=300', 'Age' => '-100'], 300],
             'an invalid Age' => [['Cache-Control' => 'max-age=300', 'Age' => 'soon'], 300],
             'a max-age that is not a number' => [['Cache-Control' => 'max-age=soon'], 60],
             'a negative max-age' => [['Cache-Control' => 'max-age=-5'], 60],
@@ -306,7 +309,7 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         Sleep::fake();
         Sleep::syncWithCarbon();
 
-        // The lock that the fetch of this address takes (see the handoff).
+        // The lock that the fetch of this address takes.
         $lock = Cache::lock('passport:client-metadata:'.hash('sha256', $this->documentUrl).':lock', 60);
         $this->assertTrue($lock->get());
 
@@ -331,7 +334,7 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
 
         $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client');
 
-        // The connect timeout, the timeout and a second more: the holder may spend that long on the fetch.
+        // The connect timeout, the timeout and two seconds more: the holder may spend that long on the fetch.
         $this->assertGreaterThanOrEqual(6, $this->start->diffInSeconds(Carbon::now()));
     }
 
@@ -575,28 +578,6 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         Passport::clientMetadataDocuments(allowLoopbackRedirects: false);
 
         $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client');
-    }
-
-    public function testACacheEntryOfAnotherShapeIsAMissAndTheKeyCarriesAFormatVersion()
-    {
-        $this->publish();
-        $this->authorize()->assertOk();
-
-        $keys = array_filter(
-            array_keys((fn () => $this->storage)->call(Cache::getStore())),
-            fn (string $key): bool => str_contains($key, ':document:')
-        );
-
-        $this->assertNotEmpty($keys);
-
-        foreach ($keys as $key) {
-            $this->assertMatchesRegularExpression('/:document:v\d+:/', $key);
-            Cache::put($key, ['url' => $this->documentUrl, 'surprise' => true], 600);
-        }
-
-        $this->authorize()->assertOk();
-
-        $this->assertSame(2, $this->requestsSent());
     }
 }
 

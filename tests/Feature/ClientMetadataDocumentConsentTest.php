@@ -240,6 +240,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'a different host' => [['http://localhost/callback'], 'http://localhost.evil.test:54321/callback', false],
             'a loopback address instead of the name' => [['http://localhost/callback'], 'http://127.0.0.1:54321/callback', false],
             'https instead of http' => [['http://localhost/callback'], 'https://localhost:54321/callback', false],
+            'https on another port when https is listed' => [['https://localhost/callback'], 'https://localhost:8443/callback', false],
             'user information' => [['http://localhost/callback'], 'http://user@localhost:54321/callback', false],
             'a fragment' => [['http://localhost/callback'], 'http://localhost:54321/callback#x', false],
             'the same query on any port' => [['http://localhost/callback?x=1'], 'http://localhost:54321/callback?x=1', true],

@@ -39,14 +39,14 @@ class Consent implements JsonSerializable
      */
     public static function for(Document $document, ?string $redirectUri): static
     {
-        $host = parse_url($document->url, PHP_URL_HOST);
+        $uri = Uri::new($document->url);
 
         return new static(
             $document->url,
-            $host,
+            $uri->getHost(),
             $document->name,
             $document->clientUri,
-            $document->clientUri !== null && Uri::new($document->url)->isSameOrigin($document->clientUri),
+            $document->clientUri !== null && $uri->isSameOrigin($document->clientUri),
             $document->logoUri,
             $redirectUri !== null && Loopback::isRedirect($redirectUri),
             array_filter($document->redirectUris, fn (string $uri): bool => ! Loopback::isRedirect($uri)) === [],

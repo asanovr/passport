@@ -2,7 +2,6 @@
 
 namespace Laravel\Passport\Bridge;
 
-use Laravel\Passport\Passport;
 use League\OAuth2\Server\Entities\ClientEntityInterface;
 use League\OAuth2\Server\Grant\AuthCodeGrant as LeagueAuthCodeGrant;
 use League\Uri\Exceptions\SyntaxError;
@@ -32,8 +31,7 @@ class AuthCodeGrant extends LeagueAuthCodeGrant
      */
     protected function isLocalhostMatch(string $redirectUri, ClientEntityInterface $client): bool
     {
-        if (! $client instanceof Client || ! $client->identifiedByMetadataDocument ||
-            ! Passport::clientMetadataDocumentsEnabled() || ! Passport::$clientMetadataDocuments['allowLoopbackRedirects']) {
+        if (! $client instanceof Client || ! $client->identifiedByMetadataDocument) {
             return false;
         }
 

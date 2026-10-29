@@ -4,6 +4,7 @@ namespace Laravel\Passport\ClientMetadata;
 
 use Closure;
 use Composer\InstalledVersions;
+use DateTimeImmutable;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\TransferException;
 use GuzzleHttp\RequestOptions;
@@ -167,7 +168,7 @@ class Fetcher
             return [];
         }
 
-        return [CURLOPT_RESOLVE => ["{$address->host}:{$address->port}:".implode(',', array_map(
+        return [CURLOPT_RESOLVE => ["{$address->host}:443:".implode(',', array_map(
             fn (string $ip): string => str_contains($ip, ':') ? "[{$ip}]" : $ip, $addresses
         ))]];
     }
@@ -187,14 +188,15 @@ class Fetcher
 
         $headers = $response->headers();
 
-        if (! $response->hasHeader('Date')) {
+        // A "Date" that is missing or that Symfony cannot read is replaced by the time of receipt (RFC 9110, 6.6.1).
+        if (DateTimeImmutable::createFromFormat(DATE_RFC2822, $response->header('Date')) === false) {
             $headers['Date'] = Date::now()->toRfc7231String();
         }
 
         $lifetime = match (true) {
             $directives->hasCacheControlDirective('no-store'), $directives->hasCacheControlDirective('no-cache') => 0,
             ($maxAge = (new HttpResponse('', 200, $headers))->getMaxAge()) === null => $configuration['defaultLifetime'],
-            default => max(0, $maxAge - max(0, (int) $response->header('Age'))),
+            default => $maxAge - max(0, (int) $response->header('Age')),
         };
 
         return max($configuration['minimumLifetime'], min($lifetime, $configuration['maximumLifetime']));

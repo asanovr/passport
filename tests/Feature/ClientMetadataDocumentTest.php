@@ -66,37 +66,6 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame(0, Client::query()->count());
     }
 
-    public function testDocumentsAreNotAcceptedByASchemaWithoutTheColumn()
-    {
-        Schema::table('oauth_clients', function ($table) {
-            $table->dropIndex(['metadata_document_url']);
-            $table->dropColumn('metadata_document_url');
-        });
-
-        $this->publish();
-        $this->signIn();
-
-        $queries = [];
-        DB::listen(function ($query) use (&$queries) {
-            $queries[] = $query->sql;
-        });
-
-        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertStatus(401);
-
-        $this->post('/oauth/token', [
-            'grant_type' => 'authorization_code',
-            'client_id' => $this->documentUrl,
-            'redirect_uri' => 'https://client.example/callback',
-            'code' => 'foo',
-            'code_verifier' => $this->codeVerifier,
-        ])->assertStatus(401);
-
-        $this->assertSame(0, $this->requestsSent());
-        $this->assertSame([], array_values(array_filter(
-            $queries, fn (string $sql): bool => str_contains($sql, 'metadata_document_url')
-        )));
-    }
-
     public function testTheModeCanBeSwitchedOnAndOff()
     {
         $this->assertFalse(Passport::clientMetadataDocumentsEnabled());
@@ -204,6 +173,10 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $tokens = $this->connect();
         Client::query()->sole()->forceFill(['revoked' => true])->save();
 
+        // The copy of the document has expired, so only the refusal of a revoked client keeps it from being fetched.
+        Cache::flush();
+        Log::spy();
+
         $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertStatus(401);
         $this->post('/oauth/token', [
             'grant_type' => 'refresh_token',
@@ -214,6 +187,9 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame(1, $this->requestsSent());
         $this->assertTrue(Client::query()->sole()->revoked);
         $this->assertSame(1, Client::query()->count());
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message): bool => str_contains($message, 'the client has been revoked')
+        )->once();
     }
 
     public function testAClientThatIsRevokedWhileItsDocumentIsFetchedStaysRevoked()

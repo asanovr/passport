@@ -15,7 +15,6 @@ use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Exceptions\AuthenticationException;
 use Laravel\Passport\Exceptions\InvalidClientMetadataException;
 use Laravel\Passport\Passport;
-use League\OAuth2\Server\Exception\OAuthServerException;
 use League\Uri\Exceptions\SyntaxError;
 use League\Uri\UriString;
 use Psr\Http\Message\ServerRequestInterface;
@@ -58,11 +57,6 @@ class Resolver
      */
     public function resolve(string $url, ServerRequestInterface $request, bool $authenticated): array
     {
-        // An application that does not accept metadata documents answers as it always has.
-        if (! Passport::clientMetadataDocumentsEnabled()) {
-            throw OAuthServerException::invalidClient($request);
-        }
-
         try {
             $address = Address::parse($url, Passport::$clientMetadataDocuments['allowPrivateNetworks']);
         } catch (UnusableDocumentException $e) {
@@ -125,13 +119,17 @@ class Resolver
 
         $lock = $this->lock($url);
 
+        if ($lock === null) {
+            return $resolve();
+        }
+
         try {
             // The wait covers everything the request that holds the lock may spend on its fetch and its write. The
             // lock gives up a quarter of a second before the seconds it is given, so two extra seconds leave at least
             // one spare.
-            return $lock?->block(
+            return $lock->block(
                 Passport::$clientMetadataDocuments['connectTimeout'] + Passport::$clientMetadataDocuments['timeout'] + 2, $resolve
-            ) ?? $resolve();
+            );
         } catch (LockTimeoutException) {
             $this->refuse($request, $url, 'another fetch of the document did not finish in time');
         }
@@ -164,10 +162,6 @@ class Resolver
      */
     protected function store(ServerRequestInterface $request, string $url, Document $document, ?Client $existing): array
     {
-        if ($existing?->revoked) {
-            $this->refuse($request, $url, 'the client has been revoked');
-        }
-
         try {
             $client = $this->clients->syncFromMetadataDocument($document, $existing);
 
@@ -178,10 +172,6 @@ class Resolver
 
                 if ($chosen !== null && ! $chosen->is($client)) {
                     $client->delete();
-
-                    if ($chosen->revoked) {
-                        $this->refuse($request, $url, 'the client has been revoked');
-                    }
 
                     $client = $this->clients->syncFromMetadataDocument($document, $chosen);
                 }
@@ -329,9 +319,7 @@ class Resolver
     {
         $cached = Cache::get($this->documentKey($url));
 
-        return is_array($cached) && array_keys($cached) === ['url', 'name', 'redirectUris', 'clientUri', 'logoUri']
-            ? new Document(...$cached)
-            : null;
+        return is_array($cached) ? new Document(...$cached) : null;
     }
 
     /**
@@ -351,7 +339,8 @@ class Resolver
      * Get the cache key of the validated document of the given address.
      *
      * The key carries the settings that decide whether a document is valid, so that a document
-     * that was validated under other settings is never used.
+     * that was validated under other settings is never used, and a format version that changes
+     * whenever the "Document" class changes, so that an entry of another shape is never read.
      */
     protected function documentKey(string $url): string
     {

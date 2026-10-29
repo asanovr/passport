@@ -10,7 +10,7 @@ use League\Uri\UriString;
 /**
  * The address of a Client ID Metadata Document.
  *
- * An address is parsed once, strictly, and read the same way by the parser the HTTP client uses.
+ * An address is parsed once, strictly, and the host that is vetted is the host the HTTP client connects to.
  */
 class Address
 {
@@ -20,7 +20,6 @@ class Address
     private function __construct(
         public readonly string $url,
         public readonly string $host,
-        public readonly int $port = 443,
     ) {
     }
 
@@ -69,12 +68,8 @@ class Address
             throw new UnusableDocumentException('the address has a port');
         }
 
-        if (! static::isValidHost($host)) {
-            throw new UnusableDocumentException('the address has an invalid host');
-        }
-
-        // The fetch is the HTTP client's, so it has to read the same host and port.
-        if ($guzzle->getHost() !== strtolower($host) || ($guzzle->getPort() ?? 443) !== ($parts['port'] ?? 443)) {
+        // The fetch is the HTTP client's, so the host it connects to is the host that is vetted.
+        if (! static::isValidHost($guzzle->getHost())) {
             throw new UnusableDocumentException('the address has an invalid host');
         }
 
@@ -96,7 +91,7 @@ class Address
             }
         }
 
-        return new self($url, $guzzle->getHost(), $parts['port'] ?? 443);
+        return new self($url, $guzzle->getHost());
     }
 
     /**

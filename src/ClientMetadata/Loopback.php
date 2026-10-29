@@ -5,6 +5,7 @@ namespace Laravel\Passport\ClientMetadata;
 use League\Uri\Exceptions\SyntaxError;
 use League\Uri\IPv4\Converter;
 use League\Uri\UriString;
+use Symfony\Component\HttpFoundation\IpUtils;
 
 class Loopback
 {
@@ -31,9 +32,7 @@ class Loopback
             return str_starts_with((string) Converter::fromEnvironment()->toDecimal($host), '127.');
         }
 
-        $address = @inet_pton(trim($host, '[]'));
-
         // An IPv4-mapped address (::ffff:127.0.0.1) is the IPv4 address it wraps.
-        return $address === inet_pton('::1') || ($address !== false && str_starts_with($address, str_repeat("\0", 10)."\xff\xff\x7f"));
+        return IpUtils::checkIp(trim($host, '[]'), ['::1/128', '::ffff:127.0.0.0/104']);
     }
 }
