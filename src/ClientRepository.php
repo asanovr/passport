@@ -60,13 +60,21 @@ class ClientRepository
             return null;
         }
 
-        $client = $this->explainingAMissingColumn(
-            fn () => Passport::client()->newQuery()->where('metadata_document_url', $url)->first()
+        $model = Passport::client();
+
+        // The column is not unique, so the oldest record is the one that holds the address. Records
+        // created in the same second are told apart by their keys, so that every request agrees.
+        $clients = $this->explainingAMissingColumn(
+            fn () => $model->newQuery()
+                ->where('metadata_document_url', $url)
+                ->oldest()
+                ->orderBy($model->getKeyName())
+                ->get()
         );
 
         // The column is matched case-insensitively by some databases. The address is
         // an identity, so we confirm that it is the very same string.
-        return $client && $client->getAttribute('metadata_document_url') === $url ? $client : null;
+        return $clients->first(fn (Client $client): bool => $client->getAttribute('metadata_document_url') === $url);
     }
 
     /**

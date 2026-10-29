@@ -3,6 +3,8 @@
 namespace Laravel\Passport\Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Orchestra\Testbench\Concerns\WithWorkbench;
 use Orchestra\Testbench\TestCase;
 
@@ -10,77 +12,66 @@ class MetadataDocumentUrlMigrationTest extends TestCase
 {
     use WithWorkbench;
 
-    public function testTheSqlServerIndexIsCreatedAndDroppedOnTheSamePrefixedNames()
+    protected function setUp(): void
     {
-        $statements = $this->statements(prefix: 'pp_', prefixIndexes: true);
+        parent::setUp();
 
-        $this->assertContains(
-            'create unique index "pp_oauth_clients_metadata_document_url_unique" on "pp_oauth_clients" (metadata_document_url) where metadata_document_url is not null',
-            $statements,
-        );
-        $this->assertContains(
-            'drop index "pp_oauth_clients_metadata_document_url_unique" on "pp_oauth_clients"',
-            $statements,
-        );
+        $this->artisan('migrate');
     }
 
-    public function testTheSqlServerIndexNameIsNotPrefixedWhenIndexesAreNotPrefixed()
+    public function testTheColumnIsRemovedWithItsIndex()
     {
-        $statements = $this->statements(prefix: 'pp_', prefixIndexes: false);
+        $this->migration()->down();
 
-        $this->assertContains(
-            'create unique index "oauth_clients_metadata_document_url_unique" on "pp_oauth_clients" (metadata_document_url) where metadata_document_url is not null',
-            $statements,
-        );
-        $this->assertContains(
-            'drop index "oauth_clients_metadata_document_url_unique" on "pp_oauth_clients"',
-            $statements,
-        );
+        $this->assertFalse(Schema::hasColumn('oauth_clients', 'metadata_document_url'));
+        $this->assertEmpty($this->indexesOnTheColumn());
+
+        $this->migration()->up();
     }
 
-    public function testTheSqlServerIndexNamesAreBareWithoutAPrefix()
+    public function testTheColumnIsNullableAndIndexedWithoutBeingUnique()
     {
-        $statements = $this->statements(prefix: '', prefixIndexes: false);
+        $this->migration()->down();
+        $this->migration()->up();
 
-        $this->assertContains(
-            'create unique index "oauth_clients_metadata_document_url_unique" on "oauth_clients" (metadata_document_url) where metadata_document_url is not null',
-            $statements,
-        );
-        $this->assertContains(
-            'drop index "oauth_clients_metadata_document_url_unique" on "oauth_clients"',
-            $statements,
-        );
+        $indexes = $this->indexesOnTheColumn();
+
+        $this->assertCount(1, $indexes);
+        $this->assertFalse($indexes[0]['unique']);
+        $this->assertSame(['metadata_document_url'], $indexes[0]['columns']);
+    }
+
+    public function testManyClientsMayShareAnAddressOrHaveNone()
+    {
+        foreach (['https://client.example/a', 'https://client.example/a', null, null] as $address) {
+            DB::table('oauth_clients')->insert([
+                'id' => (string) Str::uuid(),
+                'name' => 'Client',
+                'redirect_uris' => '[]',
+                'grant_types' => '[]',
+                'revoked' => false,
+                'metadata_document_url' => $address,
+            ]);
+        }
+
+        $this->assertSame(4, DB::table('oauth_clients')->count());
     }
 
     /**
-     * Get the statements the migration runs, up and down, on a SQL Server connection that is not connected.
+     * Get the indexes of the clients table that cover the metadata document URL column.
      *
-     * @return list<string>
+     * @return list<array<string, mixed>>
      */
-    protected function statements(string $prefix, bool $prefixIndexes): array
+    protected function indexesOnTheColumn(): array
     {
-        config([
-            'database.connections.mssql' => [
-                'driver' => 'sqlsrv',
-                'host' => 'localhost',
-                'database' => 'passport',
-                'username' => 'passport',
-                'password' => 'secret',
-                'prefix' => $prefix,
-                'prefix_indexes' => $prefixIndexes,
-            ],
-            'database.default' => 'mssql',
-        ]);
+        return array_values(array_filter(
+            Schema::getIndexes('oauth_clients'),
+            fn (array $index): bool => in_array('metadata_document_url', $index['columns'], true),
+        ));
+    }
 
-        DB::purge('mssql');
-
-        $migration = require __DIR__.'/../../database/migrations/2026_10_28_000001_add_metadata_document_url_to_oauth_clients_table.php';
-
-        $log = DB::connection('mssql')->pretend(function () use ($migration) {
-            $migration->up();
-            $migration->down();
-        });
-
-        return array_column($log, 'query');
+    protected function migration(): object
+    {
+        return require __DIR__.'/../../database/migrations/2026_10_28_000001_add_metadata_document_url_to_oauth_clients_table.php';
     }
 }

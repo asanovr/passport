@@ -439,6 +439,79 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         $this->assertSame(1, Client::query()->count());
     }
 
+    public function testARequestThatFindsNoRecordWaitsForTheLockEvenWhenTheDocumentIsCached()
+    {
+        $this->publish();
+        $this->authorize()->assertOk();
+
+        // The record is gone while its document is still cached, as it is while the request that fetched
+        // the document has not yet written its record.
+        Client::query()->delete();
+
+        Sleep::fake();
+        Sleep::syncWithCarbon();
+
+        $lock = Cache::lock('passport:client-metadata:'.hash('sha256', $this->documentUrl).':lock', 60);
+        $this->assertTrue($lock->get());
+
+        $created = null;
+        Sleep::whenFakingSleep(function () use ($lock, &$created) {
+            if ($created) {
+                return;
+            }
+
+            $created = Client::query()->forceCreate([
+                'name' => 'Example Agent',
+                'redirect_uris' => ['https://client.example/callback'],
+                'grant_types' => ['authorization_code', 'refresh_token'],
+                'revoked' => false,
+                'metadata_document_url' => $this->documentUrl,
+            ]);
+
+            $lock->release();
+        });
+
+        $response = $this->authorize()->assertOk();
+
+        $this->assertNotNull($created);
+        $this->assertSame(1, Client::query()->count());
+        $this->assertSame($created->getKey(), $response->json('client.id'));
+        $this->assertSame(1, $this->requestsSent());
+    }
+
+    public function testARequestThatIsNotSignedInDoesNotFetchWhenTheDocumentIsGoneByTheTimeItHoldsTheLock()
+    {
+        Route::get('/login', fn () => '')->name('login');
+
+        $this->publish();
+        $this->authorize()->assertOk();
+        Client::query()->delete();
+
+        $this->app['auth']->guard('web')->logout();
+
+        Sleep::fake();
+        Sleep::syncWithCarbon();
+
+        $lock = Cache::lock('passport:client-metadata:'.hash('sha256', $this->documentUrl).':lock', 60);
+        $this->assertTrue($lock->get());
+
+        $forgotten = false;
+        Sleep::whenFakingSleep(function () use ($lock, &$forgotten) {
+            if ($forgotten) {
+                return;
+            }
+
+            $forgotten = true;
+            Cache::flush();
+            $lock->release();
+        });
+
+        $this->authorize()->assertRedirectToRoute('login');
+
+        $this->assertTrue($forgotten);
+        $this->assertSame(1, $this->requestsSent());
+    }
+
     public function testSwitchingTheModeOffStopsNewAuthorizationsAndKeepsExistingConnectionsRefreshing()
     {
         $this->publish();

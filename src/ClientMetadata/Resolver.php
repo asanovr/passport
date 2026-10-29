@@ -5,6 +5,7 @@ namespace Laravel\Passport\ClientMetadata;
 use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Log;
+use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Exceptions\InvalidClientMetadataException;
 use Laravel\Passport\Passport;
@@ -68,16 +69,107 @@ class Resolver
         $document = $this->cache->get($url);
 
         if ($document === null) {
-            // Nobody who is not signed in can make the server fetch a document.
-            if (! $authenticated && Passport::$clientMetadataConfiguration->requireAuthentication) {
-                throw new SignInRequiredException;
+            $this->ensureDocumentMayBeFetched($request, $url, $authenticated);
+        }
+
+        // Only a client that exists, with a document that is fresh, is brought up to date without the lock.
+        if ($existing === null || $document === null) {
+            return $this->resolveWhileLocked($request, $address, $authenticated);
+        }
+
+        return $this->store($request, $url, $document, $existing);
+    }
+
+    /**
+     * Resolve the client behind the given document address while no other request resolves it.
+     *
+     * The lock covers the fetch and the write of the record, which is what keeps one record per address.
+     *
+     * @throws \League\OAuth2\Server\Exception\OAuthServerException
+     * @throws \Laravel\Passport\ClientMetadata\SignInRequiredException
+     */
+    protected function resolveWhileLocked(ServerRequestInterface $request, Address $address, bool $authenticated): ResolvedClient
+    {
+        $url = $address->url;
+        $configuration = Passport::$clientMetadataConfiguration;
+
+        $lock = $this->cache->lock($url);
+
+        try {
+            // The wait covers everything the request that holds the lock may spend on its fetch and its write. The
+            // lock gives up a quarter of a second before the seconds it is given, so two extra seconds leave at least
+            // one spare.
+            $lock?->block($configuration->connectTimeout + $configuration->timeout + 2);
+        } catch (LockTimeoutException) {
+            $this->refuse($request, $url, 'another fetch of the document did not finish in time');
+        }
+
+        try {
+            // The request that held the lock may have fetched the document, or failed to.
+            $document = $this->cache->get($url);
+
+            if ($document === null) {
+                $this->ensureDocumentMayBeFetched($request, $url, $authenticated);
+
+                $document = $this->fetch($request, $address);
             }
 
-            $document = $this->fetch($request, $address);
+            // The record is looked up as late as possible: the request that held the lock may have created it.
+            $existing = $this->clients->findByMetadataDocumentUrl($url);
+
+            return $this->store($request, $url, $document, $existing);
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    /**
+     * Refuse the request when the document of the given address may not be fetched for it.
+     *
+     * @throws \League\OAuth2\Server\Exception\OAuthServerException
+     * @throws \Laravel\Passport\ClientMetadata\SignInRequiredException
+     */
+    protected function ensureDocumentMayBeFetched(ServerRequestInterface $request, string $url, bool $authenticated): void
+    {
+        // Nobody who is not signed in can make the server fetch a document.
+        if (! $authenticated && Passport::$clientMetadataConfiguration->requireAuthentication) {
+            throw new SignInRequiredException;
+        }
+
+        if ($this->cache->isDelayed($url)) {
+            $this->refuse($request, $url, 'an earlier fetch failed and the next one is delayed');
+        }
+    }
+
+    /**
+     * Store the client of the given document, or bring the existing one up to date.
+     *
+     * @throws \League\OAuth2\Server\Exception\OAuthServerException
+     */
+    protected function store(ServerRequestInterface $request, string $url, Document $document, ?Client $existing): ResolvedClient
+    {
+        if ($existing?->revoked) {
+            $this->refuse($request, $url, 'the client has been revoked');
         }
 
         try {
             $client = $this->clients->syncFromMetadataDocument($document, $existing);
+
+            // Without a unique index, a request that does not share a lock may have created a record as well.
+            // Every request settles on the oldest one, so the newcomer yields to it.
+            if ($client->wasRecentlyCreated) {
+                $chosen = $this->clients->findByMetadataDocumentUrl($url);
+
+                if ($chosen !== null && ! $chosen->is($client)) {
+                    $client->delete();
+
+                    if ($chosen->revoked) {
+                        $this->refuse($request, $url, 'the client has been revoked');
+                    }
+
+                    $client = $this->clients->syncFromMetadataDocument($document, $chosen);
+                }
+            }
         } catch (UnusableDocumentException $e) {
             $this->refuse($request, $url, $e->getMessage());
         }
@@ -132,55 +224,28 @@ class Resolver
     }
 
     /**
-     * Fetch the document at the given address, unless another request is fetching it.
+     * Fetch the document at the given address, and keep it for as long as it is fresh.
+     *
+     * @throws \League\OAuth2\Server\Exception\OAuthServerException
      */
     protected function fetch(ServerRequestInterface $request, Address $address): Document
     {
         $url = $address->url;
 
-        if ($this->cache->isDelayed($url)) {
-            $this->refuse($request, $url, 'an earlier fetch failed and the next one is delayed');
-        }
-
-        $configuration = Passport::$clientMetadataConfiguration;
-
-        $lock = $this->cache->lock($url);
-
         try {
-            // The wait covers everything the request that holds the lock may spend on its fetch. The lock gives up
-            // a quarter of a second before the seconds it is given, so two extra seconds leave at least one spare.
-            $lock?->block($configuration->connectTimeout + $configuration->timeout + 2);
-        } catch (LockTimeoutException) {
-            $this->refuse($request, $url, 'another fetch of the document did not finish in time');
+            $fetched = $this->fetcher->fetch($address);
+
+            $this->applyValidationHook($fetched, $url);
+        } catch (UnusableDocumentException $e) {
+            $this->cache->recordFailure($url);
+
+            $this->refuse($request, $url, $e->getMessage());
         }
 
-        try {
-            // The request that held the lock may have fetched the document, or failed to.
-            if ($document = $this->cache->get($url)) {
-                return $document;
-            }
+        $this->cache->put($fetched->document, $fetched->lifetime);
+        $this->cache->forgetFailures($url);
 
-            if ($this->cache->isDelayed($url)) {
-                $this->refuse($request, $url, 'an earlier fetch failed and the next one is delayed');
-            }
-
-            try {
-                $fetched = $this->fetcher->fetch($address);
-
-                $this->applyValidationHook($fetched, $url);
-            } catch (UnusableDocumentException $e) {
-                $this->cache->recordFailure($url);
-
-                $this->refuse($request, $url, $e->getMessage());
-            }
-
-            $this->cache->put($fetched->document, $fetched->lifetime);
-            $this->cache->forgetFailures($url);
-
-            return $fetched->document;
-        } finally {
-            $lock?->release();
-        }
+        return $fetched->document;
     }
 
     /**

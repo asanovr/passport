@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Laravel\Passport\Bridge\ClientRepository as BridgeClientRepository;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientMetadata\DocumentCache;
 use Laravel\Passport\Database\Factories\ClientFactory;
 use Laravel\Passport\Http\Middleware\CheckToken;
 use Laravel\Passport\Passport;
@@ -46,7 +47,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
     protected function dropTheColumn(): void
     {
         Schema::table('oauth_clients', function ($table) {
-            $table->dropUnique(['metadata_document_url']);
+            $table->dropIndex(['metadata_document_url']);
             $table->dropColumn('metadata_document_url');
         });
     }
@@ -89,7 +90,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
     public function testDocumentsAreNotAcceptedByASchemaWithoutTheColumn()
     {
         Schema::table('oauth_clients', function ($table) {
-            $table->dropUnique(['metadata_document_url']);
+            $table->dropIndex(['metadata_document_url']);
             $table->dropColumn('metadata_document_url');
         });
 
@@ -131,7 +132,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
     public function testSwitchingTheModeOnWithoutTheColumnRaisesAClearError()
     {
         Schema::table('oauth_clients', function ($table) {
-            $table->dropUnique(['metadata_document_url']);
+            $table->dropIndex(['metadata_document_url']);
             $table->dropColumn('metadata_document_url');
         });
 
@@ -361,6 +362,190 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame('Example Agent', Client::query()->sole()->name);
     }
 
+    /**
+     * An application may add a unique index of its own, and then the database settles a race that no lock covers.
+     *
+     * SQLite does not abort a transaction when a statement fails, so this cannot prove that the failed insert is
+     * rolled back to a savepoint, which is what keeps the request's own transaction usable on other databases.
+     */
+    public function testARacingRequestWithoutALockIsSettledByAUniqueIndexTheApplicationAdded()
+    {
+        Schema::table('oauth_clients', fn ($table) => $table->unique(['metadata_document_url']));
+
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+
+        $lookups = 0;
+        $competitor = null;
+
+        DB::listen(function ($query) use (&$lookups, &$competitor) {
+            if ($competitor === null && str_contains($query->sql, '"metadata_document_url" = ?') && ++$lookups === 2) {
+                $competitor = $this->record(['name' => 'Raced', 'redirect_uris' => ['https://client.example/old']]);
+            }
+        });
+
+        $response = DB::transaction(
+            fn () => $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk()
+        );
+
+        $this->assertNotNull($competitor);
+        $this->assertSame($competitor->getKey(), $response->json('client.id'));
+        $this->assertSame(1, Client::query()->count());
+        $this->assertSame('Example Agent', Client::query()->sole()->name);
+    }
+
+    public function testARequestThatCreatesARecordNextToAnOlderOneContinuesWithTheOlderAndRemovesItsOwn()
+    {
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+
+        $lookups = 0;
+        $competitor = null;
+
+        // The other request creates its record after this one looked, and without any lock or unique index.
+        DB::listen(function ($query) use (&$lookups, &$competitor) {
+            if ($competitor === null && str_contains($query->sql, '"metadata_document_url" = ?') && ++$lookups === 2) {
+                $competitor = $this->record(['name' => 'Raced', 'created_at' => now()->subHour()]);
+            }
+        });
+
+        $response = $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk();
+
+        $this->assertNotNull($competitor);
+        $this->assertSame($competitor->getKey(), $response->json('client.id'));
+        $this->assertSame(1, Client::query()->count());
+        $this->assertSame('Example Agent', Client::query()->sole()->name);
+    }
+
+    public function testTheOldestOfSeveralRecordsOfAnAddressIsTheClient()
+    {
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+
+        // The older record is inserted second and has the larger key.
+        $newer = $this->record(['id' => '00000000-0000-7000-8000-000000000000', 'created_at' => now()->addHour()]);
+        $older = $this->record(['id' => 'ffffffff-ffff-7fff-bfff-ffffffffffff', 'created_at' => now()->subHour()]);
+
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk()
+            ->assertJsonPath('client.id', $older->getKey());
+
+        $tokens = $this->connect();
+        $this->post('/oauth/token', [
+            'grant_type' => 'refresh_token',
+            'client_id' => $this->documentUrl,
+            'refresh_token' => $tokens['refresh_token'],
+        ])->assertOk();
+
+        $this->assertSame([$older->getKey()], DB::table('oauth_access_tokens')->pluck('client_id')->unique()->all());
+        $this->assertSame(2, Client::query()->count());
+        $this->assertSame('Example Agent', $older->refresh()->name);
+        $this->assertSame('Example', $newer->refresh()->name);
+    }
+
+    public function testRecordsOfAnAddressCreatedInTheSameSecondAreToldApartByTheirKeys()
+    {
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+
+        $at = now()->startOfSecond();
+        $this->record(['id' => 'ffffffff-ffff-7fff-bfff-ffffffffffff', 'created_at' => $at]);
+        $first = $this->record(['id' => '00000000-0000-7000-8000-000000000000', 'created_at' => $at]);
+
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk()
+            ->assertJsonPath('client.id', $first->getKey());
+    }
+
+    public function testARevokedRecordIsNotUnblockedByANewerActiveRecordOfTheSameAddress()
+    {
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+
+        $tokens = $this->connect();
+
+        Client::query()->sole()->forceFill(['revoked' => true])->save();
+        $this->record(['created_at' => now()->addHour()]);
+
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertStatus(401);
+        $this->post('/oauth/token', [
+            'grant_type' => 'refresh_token',
+            'client_id' => $this->documentUrl,
+            'refresh_token' => $tokens['refresh_token'],
+        ])->assertStatus(401)->assertJsonPath('error', 'invalid_client');
+    }
+
+    public function testAddressesADatabaseCannotTellApartEachHaveTheirOwnRecord()
+    {
+        $this->useACaseInsensitiveColumn();
+
+        $upper = 'https://client.example/OAUTH/client.json';
+        $first = $this->record(['metadata_document_url' => $upper, 'created_at' => now()->subHour()]);
+        $second = $this->record(['created_at' => now()]);
+
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->publish(url: $upper);
+        $this->signIn();
+
+        $this->get('/oauth/authorize?'.$this->authorizationQuery($upper))->assertOk()
+            ->assertJsonPath('client.id', $first->getKey());
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk()
+            ->assertJsonPath('client.id', $second->getKey());
+    }
+
+    public function testACaseVariantOfAnAddressGetsItsOwnRecordWhenNoUniqueIndexForbidsIt()
+    {
+        $this->useACaseInsensitiveColumn();
+
+        $other = $this->record([
+            'name' => 'Victim',
+            'redirect_uris' => ['https://victim.example/callback'],
+            'metadata_document_url' => 'https://client.example/OAUTH/client.json',
+        ]);
+
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+
+        $response = $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk();
+
+        $this->assertSame(2, Client::query()->count());
+        $this->assertNotSame($other->getKey(), $response->json('client.id'));
+        $this->assertSame('Victim', $other->refresh()->name);
+        $this->assertSame(['https://victim.example/callback'], $other->redirect_uris);
+    }
+
+    /**
+     * Make the column match addresses regardless of case, as MySQL's default collation does, with a plain index.
+     */
+    protected function useACaseInsensitiveColumn(): void
+    {
+        $this->dropTheColumn();
+        DB::statement('alter table oauth_clients add column metadata_document_url varchar(255) collate nocase');
+        DB::statement('create index oauth_clients_metadata_document_url_index on oauth_clients (metadata_document_url)');
+    }
+
+    /**
+     * Store a client that is identified by the document address.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    protected function record(array $attributes = []): Client
+    {
+        return Client::query()->forceCreate(array_replace([
+            'name' => 'Example',
+            'secret' => null,
+            'redirect_uris' => ['https://client.example/callback'],
+            'grant_types' => ['authorization_code', 'refresh_token'],
+            'revoked' => false,
+            'metadata_document_url' => $this->documentUrl,
+        ], $attributes));
+    }
+
     public function testADocumentIdentifiedClientIsNeverFirstParty()
     {
         $this->assertTrue(ClientFactory::new()->asPublic()->create()->firstParty());
@@ -574,6 +759,10 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->get('/oauth/authorize?'.$this->authorizationQuery())
             ->assertStatus(401)
             ->assertJsonPath('error', 'invalid_client');
+
+        // The refusal is not a failed fetch: the document stays cached and the address is not delayed.
+        $this->assertNotNull(app(DocumentCache::class)->get($this->documentUrl));
+        $this->assertFalse(app(DocumentCache::class)->isDelayed($this->documentUrl));
 
         $other->refresh();
         $this->assertSame('Victim', $other->name);
