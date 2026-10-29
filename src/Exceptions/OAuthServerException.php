@@ -25,18 +25,19 @@ class OAuthServerException extends HttpResponseException
 
     /**
      * Create a new OAuthServerException for when login is required.
-     *
-     * Without an authorization request, there is no redirect address that can be trusted to send the error to.
      */
     public static function loginRequired(?AuthorizationRequestInterface $authRequest = null): static
     {
+        $redirectUri = $authRequest?->getRedirectUri()
+            ?? ($authRequest ? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] : null);
+
         $exception = new LeagueException(
             'The authorization server requires end-user authentication.',
             9,
             'login_required',
             401,
             'The user is not authenticated',
-            $authRequest ? $authRequest->getRedirectUri() ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] : null
+            $redirectUri
         );
 
         if ($authRequest) {
@@ -54,6 +55,9 @@ class OAuthServerException extends HttpResponseException
      */
     public static function consentRequired(AuthorizationRequestInterface $authRequest): static
     {
+        $redirectUri = $authRequest?->getRedirectUri()
+            ?? ($authRequest ? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] : null);
+
         $exception = new LeagueException(
             'The authorization server requires end-user consent.',
             9,

@@ -143,9 +143,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertRefused($this->authorize('https://client.example:/oauth/client.json'));
 
         $this->assertSame(['https://client.example/oauth/client.json'], array_map(fn (Request $request): string => $request->url(), $this->sentRequests()));
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message): bool => str_contains($message, 'client_id does not match its address')
-        )->once();
+        $this->assertRefusalLogged('client_id does not match its address');
     }
 
     /**
@@ -170,9 +168,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
 
         $this->assertRefused($this->authorize());
 
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message): bool => str_contains($message, 'the document is not a JSON object')
-        )->once();
+        $this->assertRefusalLogged('The document is not a JSON object.');
     }
 
     public function testAHostInCapitalsIsFetchedAndPinnedByItsLowerCaseName()
@@ -377,12 +373,8 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertRefused($this->authorize('https://client.example/oauth/../client.json'));
 
         Log::shouldHaveReceived('warning')->twice();
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message, array $context): bool => str_contains($message, 'status 500') && $context === ['host' => 'client.example']
-        )->once();
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message, array $context): bool => str_contains($message, 'dot segment') && $context === ['host' => 'client.example']
-        )->once();
+        $this->assertRefusalLogged('status 500');
+        $this->assertRefusalLogged('dot segment');
         Log::shouldNotHaveReceived('warning', fn (string $message): bool => str_contains($message, 'SECRET-BODY'));
     }
 
@@ -417,12 +409,8 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertRefused($this->authorize());
 
         $this->assertSame(1, $attempts);
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message, array $context): bool => str_contains($message, $reason) && $context === ['host' => 'client.example']
-        )->once();
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message): bool => str_contains($message, 'the next one is delayed')
-        )->once();
+        $this->assertRefusalLogged($reason);
+        $this->assertRefusalLogged('the next one is delayed');
         Log::shouldNotHaveReceived('warning', fn (string $message): bool => str_contains($message, 'SECRET-BODY'));
     }
 

@@ -45,19 +45,19 @@ class ClientRepository
      */
     public function findByMetadataDocumentUrl(string $url): ?Client
     {
-        $model = Passport::client();
+        $client = Passport::client();
 
         // The column is not unique, so the oldest record is the one that holds the address. Records
         // created in the same second are told apart by their keys, so that every request agrees.
-        $clients = $model->newQuery()
+        $clients = $client->newQuery()
             ->where('metadata_document_url', $url)
             ->oldest()
-            ->orderBy($model->getKeyName())
+            ->orderBy($client->getKeyName())
             ->get();
 
         // The column is matched case-insensitively by some databases. The address is
         // an identity, so we confirm that it is the very same string.
-        return $clients->first(fn (Client $client): bool => $client->getAttribute('metadata_document_url') === $url);
+        return $clients->first(fn (Client $client): bool => $client->metadata_document_url === $url);
     }
 
     /**
@@ -82,32 +82,30 @@ class ClientRepository
             'redirect_uris' => $document->redirectUris,
         ];
 
-        if ($existing === null) {
-            $existing = Model::unguarded(fn (): Client => Passport::client()->newQuery()->createOrFirst(
-                ['metadata_document_url' => $document->url],
-                [
-                    ...$attributes,
-                    'secret' => null,
-                    'provider' => null,
-                    'grant_types' => ['authorization_code', 'refresh_token'],
-                    'revoked' => false,
-                ]
-            ));
+        $client = $existing ?? Model::unguarded(fn (): Client => Passport::client()->newQuery()->createOrFirst(
+            ['metadata_document_url' => $document->url],
+            [
+                ...$attributes,
+                'secret' => null,
+                'provider' => null,
+                'grant_types' => ['authorization_code', 'refresh_token'],
+                'revoked' => false,
+            ]
+        ));
 
-            // A case-insensitive column hands back the record of another address that it cannot tell
-            // apart from this one. That record belongs to another client, so it is never touched.
-            if ($existing->getAttribute('metadata_document_url') !== $document->url) {
-                throw new UnusableDocumentException('the address is held by a client whose address differs only in case');
-            }
+        // A case-insensitive column hands back the record of another address that it cannot tell
+        // apart from this one. That record belongs to another client, so it is never touched.
+        if ($client->metadata_document_url !== $document->url) {
+            throw new UnusableDocumentException('The address is held by a client whose address differs only in case.');
         }
 
         // A client created by another request in the meantime, or one that already
         // existed, is revoked or not as it was: a fetch never un-revokes a client.
-        if (! $existing->wasRecentlyCreated && ! $existing->revoked) {
-            $existing->forceFill($attributes)->save();
+        if (! $client->wasRecentlyCreated && ! $client->revoked) {
+            $client->forceFill($attributes)->save();
         }
 
-        return $existing;
+        return $client;
     }
 
     /**

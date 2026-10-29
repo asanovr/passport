@@ -5,6 +5,7 @@ namespace Laravel\Passport\Tests\Feature;
 use GuzzleHttp\RequestOptions;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
 use Throwable;
@@ -183,5 +184,18 @@ trait InteractsWithClientMetadataDocuments
             'code' => $params['code'],
             'code_verifier' => $this->codeVerifier,
         ])->assertOk()->json();
+    }
+
+    /**
+     * Assert that a refusal for the given reason was logged with the host of the document.
+     */
+    protected function assertRefusalLogged(string $reason, string $host = 'client.example', int $times = 1): void
+    {
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message, array $context): bool => $message === 'Client metadata document refused.'
+                && array_keys($context) === ['reason', 'host']
+                && $context['host'] === $host
+                && str_contains($context['reason'], $reason)
+        )->times($times);
     }
 }

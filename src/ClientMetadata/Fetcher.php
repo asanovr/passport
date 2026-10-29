@@ -19,15 +19,10 @@ use Psr\Http\Message\RequestInterface;
 use Symfony\Component\HttpFoundation\HeaderBag;
 use Symfony\Component\HttpFoundation\IpUtils;
 
-/**
- * Fetches the document published at an address, only from hosts that are reachable from the whole internet.
- */
 class Fetcher
 {
     /**
-     * The ranges that are not globally reachable and that PHP's global range flag lets through, as CIDR blocks.
-     *
-     * These are the 6to4 relay anycast, multicast, 6to4 (until PHP 8.4) and the 2024 documentation range.
+     * The ranges that PHP's global range flag lets through and that are not globally reachable.
      *
      * @var string[]
      */
@@ -41,7 +36,7 @@ class Fetcher
     /**
      * Fetch the document published at the given address and decode it.
      *
-     * @return array{0: array<string, mixed>, 1: int} The document as it was published and the seconds it stays fresh.
+     * @return array{data: array<string, mixed>, lifetime: int}
      *
      * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
      */
@@ -51,8 +46,6 @@ class Fetcher
 
         $sink = new LimitedStream($configuration['maximumSize']);
 
-        // Everything that decides how safe the fetch is, is set here and not left to the application's
-        // global HTTP client options.
         $options = [
             'sink' => $sink,
             'verify' => true,
@@ -69,16 +62,13 @@ class Fetcher
             $options['curl'][CURLOPT_PROTOCOLS] = CURLPROTO_HTTPS;
         }
 
-        if ($configuration['proxy'] !== null) {
-            // The proxy resolves the host and decides which addresses it may reach.
+        if (! is_null($configuration['proxy'])) {
             $options['proxy'] = $configuration['proxy'];
 
-            // The proxy is for every host, whatever the "NO_PROXY" environment variable says.
             if ($this->curlReadsProxyEnvironment()) {
                 $options['curl'][CURLOPT_NOPROXY] = '';
             }
         } else {
-            // An empty proxy keeps the proxy environment variables from redirecting the fetch.
             $options['proxy'] = '';
 
             if (! $configuration['allowPrivateNetworks']) {
@@ -93,25 +83,24 @@ class Fetcher
                 ->get($address->url);
         } catch (HttpClientException|TransferException $e) {
             throw new UnusableDocumentException(match (true) {
-                $sink->exceeded => 'the document is larger than the maximum size',
-                str_contains($e->getMessage(), 'cURL error 28') => 'the request for the document timed out',
-                default => 'the document could not be fetched',
+                $sink->exceeded => 'The document is larger than the maximum size.',
+                str_contains($e->getMessage(), 'cURL error 28') => 'The request for the document timed out.',
+                default => 'The document could not be fetched.',
             }, previous: $e);
         }
 
         if ($response->status() !== 200) {
-            throw new UnusableDocumentException("the document answered with status {$response->status()}");
+            throw new UnusableDocumentException("The document answered with status {$response->status()}.");
         }
 
-        return [$this->decode($response, $configuration['maximumSize']), $this->lifetime($response, $configuration)];
+        return [
+            'data' => $this->decode($response, $configuration['maximumSize']),
+            'lifetime' => $this->lifetime($response, $configuration),
+        ];
     }
 
     /**
-     * Get the middleware that sets the cURL options of the request to the given ones, and nothing the HTTP client
-     * has been given for every request.
-     *
-     * The options are merged recursively, so the "curl" option of the application's global options would
-     * otherwise stay, and cURL applies it after the options that make the fetch safe. Global middleware still runs.
+     * Get the middleware that sets the cURL options of the request to the given ones.
      *
      * @param  array<int, mixed>  $curl
      */
@@ -124,9 +113,6 @@ class Fetcher
 
     /**
      * Determine if cURL itself reads the "NO_PROXY" environment variable for a proxy it has been given.
-     *
-     * Guzzle 7.12 resolves the proxy environment itself and deprecates the cURL option that turns this
-     * off, and Guzzle 8 refuses it. Earlier releases leave it to cURL.
      */
     protected function curlReadsProxyEnvironment(): bool
     {
@@ -147,35 +133,34 @@ class Fetcher
     protected function pin(Address $address): array
     {
         if (! $this->canPin()) {
-            throw new UnusableDocumentException('connections cannot be pinned to the vetted addresses');
+            throw new UnusableDocumentException('Connections cannot be pinned to the vetted addresses.');
         }
 
         $addresses = $this->publicAddresses($address->host);
 
-        // A host that is an address needs no pin.
         if (filter_var(trim($address->host, '[]'), FILTER_VALIDATE_IP) !== false) {
             return [];
         }
 
-        return [CURLOPT_RESOLVE => ["{$address->host}:443:".implode(',', array_map(
-            fn (string $ip): string => str_contains($ip, ':') ? "[{$ip}]" : $ip, $addresses
-        ))]];
+        $ips = collect($addresses)
+            ->map(fn (string $ip): string => str_contains($ip, ':') ? "[{$ip}]" : $ip)
+            ->implode(',');
+
+        return [CURLOPT_RESOLVE => ["{$address->host}:443:{$ips}"]];
     }
 
     /**
      * Get the number of seconds the document in the given response stays fresh.
      *
-     * The freshness is that of RFC 9111: the time the response has already spent in a cache, as the "Age"
-     * header says, is not counted again, and "s-maxage" is read before "max-age" because the cache is shared.
-     *
      * @param  array{defaultLifetime: int, minimumLifetime: int, maximumLifetime: int}  $configuration
      */
     protected function lifetime(Response $response, array $configuration): int
     {
-        // A response object invents "Cache-Control: no-cache, private" when it has none, so the header is read as sent.
+        // A response object invents "Cache-Control: no-cache, private" when it has none, so we read the header as sent.
         $directives = new HeaderBag(['Cache-Control' => $response->header('Cache-Control')]);
 
-        // Only the headers that decide the lifetime are given to the response object, which parses every cookie it is given.
+        // The response object parses every cookie it is given, so we give it only the headers that
+        // decide the lifetime.
         $headers = array_filter([
             'Cache-Control' => $response->header('Cache-Control'),
             'Expires' => $response->header('Expires'),
@@ -187,9 +172,11 @@ class Fetcher
             $headers['Date'] = Date::now()->toRfc7231String();
         }
 
+        $maxAge = (new HttpResponse('', 200, $headers))->getMaxAge();
+
         $lifetime = match (true) {
             $directives->hasCacheControlDirective('no-store'), $directives->hasCacheControlDirective('no-cache') => 0,
-            ($maxAge = (new HttpResponse('', 200, $headers))->getMaxAge()) === null => $configuration['defaultLifetime'],
+            is_null($maxAge) => $configuration['defaultLifetime'],
             default => $maxAge - max(0, (int) $response->header('Age')),
         };
 
@@ -208,24 +195,24 @@ class Fetcher
         $mediaType = strtolower(trim(explode(';', $response->header('Content-Type'))[0]));
 
         if (! Str::is(['application/json', 'application/*+json'], $mediaType)) {
-            throw new UnusableDocumentException('the document is not served as JSON');
+            throw new UnusableDocumentException('The document is not served as JSON.');
         }
 
         $body = $response->body();
 
         if (strlen($body) > $maximumSize) {
-            throw new UnusableDocumentException('the document is larger than the maximum size');
+            throw new UnusableDocumentException('The document is larger than the maximum size.');
         }
 
         // The decoder counts one level more than the containers a document nests.
         $data = json_decode($body, true, static::MAXIMUM_NESTING + 1);
 
         if (json_last_error() === JSON_ERROR_DEPTH) {
-            throw new UnusableDocumentException('the document is nested too deeply');
+            throw new UnusableDocumentException('The document is nested too deeply.');
         }
 
         if (! is_array($data) || array_is_list($data)) {
-            throw new UnusableDocumentException('the document is not a JSON object');
+            throw new UnusableDocumentException('The document is not a JSON object.');
         }
 
         return $data;
@@ -244,13 +231,13 @@ class Fetcher
 
         $addresses = filter_var($host, FILTER_VALIDATE_IP) !== false ? [$host] : $this->resolve($host);
 
-        if ($addresses === []) {
-            throw new UnusableDocumentException('the host does not resolve to any address');
+        if (empty($addresses)) {
+            throw new UnusableDocumentException('The host does not resolve to any address.');
         }
 
         foreach ($addresses as $address) {
             if (! $this->isGlobal($address)) {
-                throw new UnusableDocumentException("the host resolves to a non-public address ({$address})");
+                throw new UnusableDocumentException("The host resolves to a non-public address ({$address}).");
             }
         }
 

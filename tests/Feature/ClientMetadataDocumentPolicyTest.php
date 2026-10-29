@@ -212,9 +212,7 @@ class ClientMetadataDocumentPolicyTest extends PassportTestCase
         $this->assertSame('invalid_client', $response->json('error'));
         $this->assertSame("The client's metadata document could not be used.", $response->json('error_description'));
         $this->assertSame(0, Client::query()->count());
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message, array $context): bool => str_contains($message, 'look-alike host') && $context === ['host' => 'client.example']
-        )->once();
+        $this->assertRefusalLogged('look-alike host');
     }
 
     public function testAReasonFromTheHookDoesNotUpdateAnExistingClientAndIsNotCached()

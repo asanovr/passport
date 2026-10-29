@@ -147,9 +147,7 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
 
         $this->authorize()->assertStatus(401);
 
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message, array $context): bool => str_contains($message, 'token endpoint auth method') && $context === ['host' => 'client.example']
-        )->once();
+        $this->assertRefusalLogged('token endpoint auth method');
     }
 
     /**

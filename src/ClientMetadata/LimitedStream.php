@@ -6,9 +6,6 @@ use GuzzleHttp\Psr7\StreamDecoratorTrait;
 use GuzzleHttp\Psr7\Utils;
 use Psr\Http\Message\StreamInterface;
 
-/**
- * A stream that stops accepting bytes at its limit, which aborts the transfer feeding it.
- */
 class LimitedStream implements StreamInterface
 {
     use StreamDecoratorTrait;
@@ -18,8 +15,14 @@ class LimitedStream implements StreamInterface
      */
     public bool $exceeded = false;
 
+    /**
+     * The stream the bytes are written to.
+     */
     protected StreamInterface $stream;
 
+    /**
+     * The number of bytes written so far.
+     */
     protected int $written = 0;
 
     /**

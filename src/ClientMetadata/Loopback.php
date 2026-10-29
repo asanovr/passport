@@ -11,9 +11,6 @@ class Loopback
 {
     /**
      * Determine if the given redirect address is on a loopback host, whatever its scheme.
-     *
-     * A loopback host is "localhost", any name below it, an address in "127.0.0.0/8", or "::1": where a
-     * program on the user's computer is reached.
      */
     public static function isRedirect(string $uri): bool
     {

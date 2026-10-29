@@ -2,9 +2,6 @@
 
 namespace Laravel\Passport\ClientMetadata;
 
-/**
- * A validated Client ID Metadata Document.
- */
 class Document
 {
     /**
@@ -13,11 +10,11 @@ class Document
      * @param  string[]  $redirectUris
      */
     public function __construct(
-        public readonly string $url,
-        public readonly string $name,
-        public readonly array $redirectUris,
-        public readonly ?string $clientUri = null,
-        public readonly ?string $logoUri = null,
+        public string $url,
+        public string $name,
+        public array $redirectUris,
+        public ?string $clientUri = null,
+        public ?string $logoUri = null,
     ) {
     }
 }

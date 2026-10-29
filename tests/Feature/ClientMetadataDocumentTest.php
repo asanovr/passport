@@ -187,9 +187,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame(1, $this->requestsSent());
         $this->assertTrue(Client::query()->sole()->revoked);
         $this->assertSame(1, Client::query()->count());
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message): bool => str_contains($message, 'the client has been revoked')
-        )->once();
+        $this->assertRefusalLogged('The client has been revoked.');
     }
 
     public function testAClientThatIsRevokedWhileItsDocumentIsFetchedStaysRevoked()
@@ -709,9 +707,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame('Victim', $other->name);
         $this->assertSame(['https://victim.example/callback'], $other->redirect_uris);
         $this->assertSame(1, Client::query()->count());
-        Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message): bool => str_contains($message, 'differs only in case')
-        )->once();
+        $this->assertRefusalLogged('differs only in case');
     }
 
     #[DataProvider('otherResponseTypes')]

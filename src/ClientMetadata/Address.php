@@ -8,19 +8,14 @@ use League\Uri\Exceptions\SyntaxError;
 use League\Uri\HostRecord;
 use League\Uri\UriString;
 
-/**
- * The address of a Client ID Metadata Document.
- *
- * An address is parsed once, strictly, and the host that is vetted is the host the HTTP client connects to.
- */
 class Address
 {
     /**
      * Create a new address instance.
      */
-    private function __construct(
-        public readonly string $url,
-        public readonly string $host,
+    protected function __construct(
+        public string $url,
+        public string $host,
     ) {
     }
 
@@ -29,62 +24,58 @@ class Address
      *
      * @throws \Laravel\Passport\ClientMetadata\UnusableDocumentException
      */
-    public static function parse(string $url, bool $allowPort = false): self
+    public static function parse(string $url, bool $allowPort = false): static
     {
         if (strlen($url) > 255) {
-            throw new UnusableDocumentException('the address is longer than 255 bytes');
+            throw new UnusableDocumentException('The address is longer than 255 bytes.');
         }
 
         if (! UriString::containsRfc3986Chars($url)) {
-            throw new UnusableDocumentException('the address contains a character that a URI may not contain');
+            throw new UnusableDocumentException('The address contains a character that a URI may not contain.');
         }
 
         try {
             $parts = UriString::parse($url);
             $guzzle = new Uri($url);
         } catch (SyntaxError|MalformedUriException) {
-            throw new UnusableDocumentException('the address is malformed');
+            throw new UnusableDocumentException('The address is malformed.');
         }
 
-        if ($parts['user'] !== null) {
-            throw new UnusableDocumentException('the address has user information');
+        if (! is_null($parts['user'])) {
+            throw new UnusableDocumentException('The address has user information.');
         }
 
-        if (! $allowPort && $parts['port'] !== null) {
-            throw new UnusableDocumentException('the address has a port');
+        if (! $allowPort && ! is_null($parts['port'])) {
+            throw new UnusableDocumentException('The address has a port.');
         }
 
-        // The fetch is the HTTP client's, so the host it connects to is the host that is vetted.
         if (! static::isValidHost($guzzle->getHost())) {
-            throw new UnusableDocumentException('the address has an invalid host');
+            throw new UnusableDocumentException('The address has an invalid host.');
         }
 
-        if ($parts['fragment'] !== null) {
-            throw new UnusableDocumentException('the address has a fragment');
+        if (! is_null($parts['fragment'])) {
+            throw new UnusableDocumentException('The address has a fragment.');
         }
 
-        if ($parts['query'] !== null) {
-            throw new UnusableDocumentException('the address has a query');
+        if (! is_null($parts['query'])) {
+            throw new UnusableDocumentException('The address has a query.');
         }
 
-        if (in_array($parts['path'], ['', '/'], true)) {
-            throw new UnusableDocumentException('the address has no path');
+        if (in_array($parts['path'], ['', '/'])) {
+            throw new UnusableDocumentException('The address has no path.');
         }
 
         foreach (explode('/', $parts['path']) as $segment) {
-            if (in_array(rawurldecode($segment), ['.', '..'], true)) {
-                throw new UnusableDocumentException('the address has a dot segment');
+            if (in_array(rawurldecode($segment), ['.', '..'])) {
+                throw new UnusableDocumentException('The address has a dot segment.');
             }
         }
 
-        return new self($url, $guzzle->getHost());
+        return new static($url, $guzzle->getHost());
     }
 
     /**
      * Determine if the given host is a DNS name or an IP address.
-     *
-     * Only these hosts are fetched, so that the host that is vetted is the host the connection is made to,
-     * whichever way a URI parser or the transport reads an unusual one.
      */
     protected static function isValidHost(string $host): bool
     {

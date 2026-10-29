@@ -182,7 +182,6 @@ class Client extends Model
      */
     public function firstParty(): bool
     {
-        // A client that is identified by its metadata document is published by a stranger.
         if ($this->identifiedByMetadataDocument()) {
             return false;
         }
@@ -205,11 +204,7 @@ class Client extends Model
     }
 
     /**
-     * Determine if a person's earlier grant to the client may stand in for their consent to a new request.
-     *
-     * A client that is identified by a metadata document is not re-approved silently when the request sends
-     * the person back to a loopback host, that is, to a program on their own computer, because any such
-     * program can borrow the document.
+     * Determine if an earlier grant to the client may stand in for the user's consent to the given redirect address.
      */
     public function mayReuseGrant(?string $redirectUri): bool
     {
@@ -217,7 +212,7 @@ class Client extends Model
             return true;
         }
 
-        return $redirectUri === null || ! Loopback::isRedirect($redirectUri);
+        return is_null($redirectUri) || ! Loopback::isRedirect($redirectUri);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Laravel\Passport\Bridge;
 
+use Illuminate\Support\Arr;
 use League\OAuth2\Server\Entities\ClientEntityInterface;
 use League\OAuth2\Server\Grant\AuthCodeGrant as LeagueAuthCodeGrant;
 use League\Uri\Exceptions\SyntaxError;
@@ -25,9 +26,6 @@ class AuthCodeGrant extends LeagueAuthCodeGrant
 
     /**
      * Determine if the redirect address is a listed "http://localhost" address on any port.
-     *
-     * League matches "http://127.0.0.1" and "http://[::1]" this way for every client, and a client that is
-     * identified by a metadata document comes back on whichever port is free.
      */
     protected function isLocalhostMatch(string $redirectUri, ClientEntityInterface $client): bool
     {
@@ -45,13 +43,13 @@ class AuthCodeGrant extends LeagueAuthCodeGrant
             return false;
         }
 
-        foreach ((array) $client->getRedirectUri() as $listed) {
+        foreach (Arr::wrap($client->getRedirectUri()) as $listed) {
             try {
                 if ((string) Uri::new($listed)->withPort(null) === (string) $requested->withPort(null)) {
                     return true;
                 }
             } catch (SyntaxError) {
-                continue;
+                //
             }
         }
 

@@ -8,9 +8,6 @@ use Laravel\Passport\Passport;
 use League\Uri\Exceptions\SyntaxError;
 use League\Uri\UriString;
 
-/**
- * Validates the JSON of a Client ID Metadata Document.
- */
 class DocumentValidator
 {
     /**
@@ -22,7 +19,7 @@ class DocumentValidator
     }
 
     /**
-     * Validate the decoded document published at the given address, and let the application refuse it.
+     * Validate the decoded document published at the given address.
      *
      * @param  array<string, mixed>  $data
      *
@@ -59,33 +56,39 @@ class DocumentValidator
         }
 
         if (($data['client_id'] ?? null) !== $address->url) {
-            throw new UnusableDocumentException("the document's client_id does not match its address");
+            throw new UnusableDocumentException("The document's client_id does not match its address.");
         }
 
         foreach ($data['redirect_uris'] as $redirectUri) {
             try {
                 $uri = UriString::parse($redirectUri);
             } catch (SyntaxError) {
-                throw new UnusableDocumentException('a redirect address is malformed');
+                throw new UnusableDocumentException('A redirect address is malformed.');
             }
 
-            if (($uri['host'] ?? '') === '' || $uri['user'] !== null) {
-                throw new UnusableDocumentException('a redirect address is relative, has no host or has user information');
+            if (($uri['host'] ?? '') === '' || ! is_null($uri['user'])) {
+                throw new UnusableDocumentException(
+                    'A redirect address is relative, has no host or has user information.'
+                );
             }
 
-            if ($uri['fragment'] !== null) {
-                throw new UnusableDocumentException('a redirect address has a fragment');
+            if (! is_null($uri['fragment'])) {
+                throw new UnusableDocumentException('A redirect address has a fragment.');
             }
 
             $loopback = Loopback::isRedirect($redirectUri);
             $scheme = strtolower((string) $uri['scheme']);
 
             if ($scheme !== 'https' && ! ($scheme === 'http' && $loopback)) {
-                throw new UnusableDocumentException('a redirect address is neither https nor plain http on a loopback host');
+                throw new UnusableDocumentException(
+                    'A redirect address is neither https nor plain http on a loopback host.'
+                );
             }
 
             if ($loopback && ! Passport::$clientMetadataDocuments['allowLoopbackRedirects']) {
-                throw new UnusableDocumentException('a redirect address is a loopback address, which is not allowed');
+                throw new UnusableDocumentException(
+                    'A redirect address is a loopback address, which is not allowed.'
+                );
             }
         }
 
@@ -105,7 +108,7 @@ class DocumentValidator
     }
 
     /**
-     * Let the application refuse a document that Passport has validated.
+     * Let the application refuse the validated document.
      *
      * @param  array<string, mixed>  $data
      *
@@ -120,7 +123,7 @@ class DocumentValidator
         $reason = (Passport::$clientMetadataDocumentValidator)($data, $url);
 
         if (is_string($reason) && $reason !== '') {
-            throw new UnusableDocumentException("the application refused the document: {$reason}");
+            throw new UnusableDocumentException("The application refused the document. {$reason}");
         }
     }
 }

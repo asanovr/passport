@@ -8,9 +8,7 @@ use Psr\Http\Message\ServerRequestInterface;
 class InvalidClientMetadataException extends LeagueException
 {
     /**
-     * Create a new exception for a client whose metadata document cannot be used.
-     *
-     * The message is deliberately generic: the reason is logged, never sent to the client.
+     * Create a new InvalidClientMetadataException for an unusable metadata document.
      */
     public static function unusable(ServerRequestInterface $serverRequest): static
     {

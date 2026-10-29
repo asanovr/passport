@@ -36,7 +36,8 @@ class ClientRepository implements ClientRepositoryInterface
             }
 
             // The connections that were made while documents were accepted keep working once they are switched off.
-            if ($record === null && Passport::$clientMetadataDocuments !== null && Resolver::isAddress($clientIdentifier)) {
+            if (is_null($record) && ! is_null(Passport::$clientMetadataDocuments) &&
+                Resolver::isAddress($clientIdentifier)) {
                 $record = $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier);
             }
         }

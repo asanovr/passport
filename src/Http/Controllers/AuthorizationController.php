@@ -61,10 +61,10 @@ class AuthorizationController
         }
 
         try {
-            $resolved = $this->withErrorHandling(
+            [$documentClient, $document] = $this->withErrorHandling(
                 fn (): ?array => $this->resolveClientMetadata($psrRequest),
                 $useFragment
-            );
+            ) ?? [null, null];
         } catch (AuthenticationException) {
             // The redirect address in the request has not been checked yet, so nothing is ever redirected to it.
             $prompt->contains('none')
@@ -104,9 +104,11 @@ class AuthorizationController
         $authRequest->setUser(new User($user->getAuthIdentifier()));
 
         $scopes = $this->parseScopes($authRequest);
-        $client = $resolved[0] ?? $this->clients->find($authRequest->getClient()->getIdentifier());
+        $client = $documentClient ?? $this->clients->find($authRequest->getClient()->getIdentifier());
 
-        $redirectUri = $authRequest->getRedirectUri() ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] ?? null;
+        $redirectUri = $authRequest->getRedirectUri()
+            ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0]
+            ?? null;
 
         if ($prompt->doesntContain('consent') &&
             ($client->skipsAuthorization($user, $scopes) ||
@@ -127,7 +129,7 @@ class AuthorizationController
             'scopes' => $scopes,
             'request' => $request,
             'authToken' => $authToken,
-            ...($resolved ? ['clientMetadata' => Consent::for($resolved[1], $redirectUri)] : []),
+            ...($document ? ['clientMetadata' => Consent::for($document, $redirectUri)] : []),
         ]);
     }
 
@@ -143,8 +145,8 @@ class AuthorizationController
     {
         $clientId = $psrRequest->getQueryParams()['client_id'] ?? null;
 
-        // Only the authorization code flow identifies a client by a document: the other
-        // response types are never answered with a fetch, nor with a record.
+        // Only the authorization code flow identifies a client by a document, so no other
+        // response type is ever answered with a fetch, nor with a record.
         if (! Passport::clientMetadataDocumentsEnabled() ||
             ($psrRequest->getQueryParams()['response_type'] ?? null) !== 'code' ||
             ! is_string($clientId) || ! Resolver::isAddress($clientId)) {

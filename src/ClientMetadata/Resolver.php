@@ -15,9 +15,6 @@ use Laravel\Passport\Exceptions\InvalidClientMetadataException;
 use Laravel\Passport\Passport;
 use Psr\Http\Message\ServerRequestInterface;
 
-/**
- * Resolves a client id that is the address of a Client ID Metadata Document.
- */
 class Resolver
 {
     /**
@@ -61,24 +58,24 @@ class Resolver
 
         $allowed = Passport::$clientMetadataDocuments['allowedHosts'];
 
-        if ($allowed !== [] && ! Str::is(array_map('strtolower', $allowed), strtolower($address->host))) {
-            $this->refuse($request, $url, 'the host is not in the list of allowed hosts');
+        if (! empty($allowed) && ! Str::is(array_map(strtolower(...), $allowed), strtolower($address->host))) {
+            $this->refuse($request, $url, 'The host is not in the list of allowed hosts.');
         }
 
         $existing = $this->clients->findByMetadataDocumentUrl($url);
 
         if ($existing?->revoked) {
-            $this->refuse($request, $url, 'the client has been revoked');
+            $this->refuse($request, $url, 'The client has been revoked.');
         }
 
         $document = $this->cached($url);
 
-        if ($document === null) {
+        if (is_null($document)) {
             $this->ensureMayFetch($request, $url, $authenticated);
         }
 
         // Only a client that exists, with a document that is fresh, is brought up to date without the lock.
-        if ($existing === null || $document === null) {
+        if (is_null($existing) || is_null($document)) {
             return $this->resolveWhileLocked($request, $address, $authenticated);
         }
 
@@ -88,46 +85,46 @@ class Resolver
     /**
      * Resolve the client behind the given document address while no other request resolves it.
      *
-     * The lock covers the fetch and the write of the record, which is what keeps one record per address.
-     *
      * @return array{0: \Laravel\Passport\Client, 1: \Laravel\Passport\ClientMetadata\Document}
      *
      * @throws \League\OAuth2\Server\Exception\OAuthServerException
      * @throws \Laravel\Passport\Exceptions\AuthenticationException
      */
-    protected function resolveWhileLocked(ServerRequestInterface $request, Address $address, bool $authenticated): array
+    protected function resolveWhileLocked(
+        ServerRequestInterface $request,
+        Address $address,
+        bool $authenticated
+    ): array
     {
         $url = $address->url;
 
-        $resolve = function () use ($request, $address, $authenticated): array {
+        $resolve = function () use ($request, $address, $url, $authenticated): array {
             // The request that held the lock may have fetched the document, or failed to.
-            $document = $this->cached($address->url);
+            $document = $this->cached($url);
 
-            if ($document === null) {
-                $this->ensureMayFetch($request, $address->url, $authenticated);
+            if (is_null($document)) {
+                $this->ensureMayFetch($request, $url, $authenticated);
 
                 $document = $this->fetch($request, $address);
             }
 
             // The record is looked up as late as possible: the request that held the lock may have created it.
-            return $this->store($request, $address->url, $document, $this->clients->findByMetadataDocumentUrl($address->url));
+            return $this->store($request, $url, $document, $this->clients->findByMetadataDocumentUrl($url));
         };
 
         $lock = $this->lock($url);
 
-        if ($lock === null) {
+        if (is_null($lock)) {
             return $resolve();
         }
 
+        $budget = Passport::$clientMetadataDocuments['connectTimeout'] + Passport::$clientMetadataDocuments['timeout'];
+
         try {
-            // The wait covers everything the request that holds the lock may spend on its fetch and its write. The
-            // lock gives up a quarter of a second before the seconds it is given, so two extra seconds leave at least
-            // one spare.
-            return $lock->block(
-                Passport::$clientMetadataDocuments['connectTimeout'] + Passport::$clientMetadataDocuments['timeout'] + 2, $resolve
-            );
+            // The lock gives up a quarter of a second before the seconds it is given, so we wait two extra seconds.
+            return $lock->block($budget + 2, $resolve);
         } catch (LockTimeoutException) {
-            $this->refuse($request, $url, 'another fetch of the document did not finish in time');
+            $this->refuse($request, $url, 'Another fetch of the document did not finish in time.');
         }
     }
 
@@ -139,13 +136,12 @@ class Resolver
      */
     protected function ensureMayFetch(ServerRequestInterface $request, string $url, bool $authenticated): void
     {
-        // Nobody who is not signed in can make the server fetch a document.
         if (! $authenticated && Passport::$clientMetadataDocuments['requireAuthentication']) {
             throw new AuthenticationException;
         }
 
         if (Cache::has($this->key($url).':delayed')) {
-            $this->refuse($request, $url, 'an earlier fetch failed and the next one is delayed');
+            $this->refuse($request, $url, 'An earlier fetch failed and the next one is delayed.');
         }
     }
 
@@ -156,17 +152,22 @@ class Resolver
      *
      * @throws \League\OAuth2\Server\Exception\OAuthServerException
      */
-    protected function store(ServerRequestInterface $request, string $url, Document $document, ?Client $existing): array
+    protected function store(
+        ServerRequestInterface $request,
+        string $url,
+        Document $document,
+        ?Client $existing
+    ): array
     {
         try {
             $client = $this->clients->syncFromMetadataDocument($document, $existing);
 
-            // Without a unique index, a request that does not share a lock may have created a record as well.
-            // Every request settles on the oldest one, so the newcomer yields to it.
+            // Without a unique index, two requests that do not share a lock may both create a record, so
+            // we will always settle on the oldest record for the address and remove the one we created.
             if ($client->wasRecentlyCreated) {
                 $chosen = $this->clients->findByMetadataDocumentUrl($url);
 
-                if ($chosen !== null && ! $chosen->is($client)) {
+                if (! is_null($chosen) && ! $chosen->is($client)) {
                     $client->delete();
 
                     $client = $this->clients->syncFromMetadataDocument($document, $chosen);
@@ -177,7 +178,7 @@ class Resolver
         }
 
         if ($client->revoked) {
-            $this->refuse($request, $url, 'the client has been revoked');
+            $this->refuse($request, $url, 'The client has been revoked.');
         }
 
         return [$client, $document];
@@ -193,7 +194,7 @@ class Resolver
         $url = $address->url;
 
         try {
-            [$data, $lifetime] = $this->fetcher->fetch($address);
+            ['data' => $data, 'lifetime' => $lifetime] = $this->fetcher->fetch($address);
 
             $document = $this->validator->validate($address, $data);
         } catch (UnusableDocumentException $e) {
@@ -226,16 +227,13 @@ class Resolver
             return null;
         }
 
-        return Cache::lock($this->key($url).':lock', Passport::$clientMetadataDocuments['connectTimeout'] +
-            Passport::$clientMetadataDocuments['timeout'] + 5);
+        $budget = Passport::$clientMetadataDocuments['connectTimeout'] + Passport::$clientMetadataDocuments['timeout'];
+
+        return Cache::lock($this->key($url).':lock', $budget + 5);
     }
 
     /**
      * Get the cache key of the validated document of the given address.
-     *
-     * The key carries the settings that decide whether a document is valid, so that a document
-     * that was validated under other settings is never used, and a format version that changes
-     * whenever the "Document" class changes, so that an entry of another shape is never read.
      */
     protected function documentKey(string $url): string
     {
@@ -256,7 +254,8 @@ class Resolver
      */
     protected function refuse(ServerRequestInterface $request, string $url, string $reason): never
     {
-        Log::warning('Client metadata document refused: '.rtrim($reason, '.').'.', [
+        Log::warning('Client metadata document refused.', [
+            'reason' => $reason,
             'host' => parse_url($url, PHP_URL_HOST) ?: null,
         ]);
 

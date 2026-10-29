@@ -308,9 +308,7 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
         $this->assertSame('invalid_client', $messages[0]['error']);
 
         foreach (['non-public address', 'could not be fetched', 'timed out', 'status 503'] as $reason) {
-            Log::shouldHaveReceived('warning')->withArgs(
-                fn (string $message, array $context): bool => str_contains($message, $reason) && $context === ['host' => 'client.example']
-            )->once();
+            $this->assertRefusalLogged($reason);
         }
     }
 }

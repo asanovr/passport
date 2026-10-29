@@ -182,7 +182,7 @@ class Passport
     public static $registersJsonApiRoutes = false;
 
     /**
-     * The options of Client ID Metadata Documents, or null when the application has never called clientMetadataDocuments().
+     * The options of the Client ID Metadata Documents, or null if they have never been configured.
      *
      * @var array{
      *     enabled: bool,
@@ -743,9 +743,7 @@ class Passport
     }
 
     /**
-     * Accept or stop accepting Client ID Metadata Documents.
-     *
-     * Every call replaces the whole configuration: options that are not given return to their defaults.
+     * Indicate whether Passport should accept Client ID Metadata Documents.
      *
      * @param  string[]  $allowedHosts
      *
@@ -794,9 +792,7 @@ class Passport
     }
 
     /**
-     * Set the callback that resolves the A and AAAA answers of a host, or null to use the system resolver.
-     *
-     * This is meant for tests: the callback receives a host name and returns its IP addresses.
+     * Specify the callback that should be invoked to resolve the hosts of client metadata documents.
      *
      * @param  (\Closure(string): string[])|null  $callback
      */
@@ -806,10 +802,7 @@ class Passport
     }
 
     /**
-     * Set the callback that applies the application's own rules to a client metadata document.
-     *
-     * The callback runs after Passport has validated the document, with the document as it was published and its address.
-     * It returns a reason to refuse the document, or null to accept it.
+     * Specify the callback that should be invoked to refuse a validated client metadata document.
      *
      * @param  (\Closure(array<string, mixed>, string): (string|null))|null  $callback
      */
