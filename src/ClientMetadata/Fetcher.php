@@ -25,24 +25,13 @@ use Symfony\Component\HttpFoundation\IpUtils;
 class Fetcher
 {
     /**
-     * The IPv4 ranges that are not globally reachable, as CIDR blocks.
+     * The ranges that are not globally reachable and that PHP's global range flag lets through, as CIDR blocks.
+     *
+     * These are the 6to4 relay anycast, multicast, 6to4 (until PHP 8.4) and the 2024 documentation range.
      *
      * @var string[]
      */
-    protected const NON_GLOBAL_IPV4 = [
-        '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',
-        '192.0.0.0/24', '192.0.2.0/24', '192.88.99.0/24', '192.168.0.0/16', '198.18.0.0/15',
-        '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4',
-    ];
-
-    /**
-     * The IPv6 ranges inside the global unicast block that are not globally reachable, as CIDR blocks.
-     *
-     * @var string[]
-     */
-    protected const NON_GLOBAL_IPV6 = [
-        '2001::/32', '2001:2::/48', '2001:10::/28', '2001:db8::/32', '2002::/16', '3fff::/20',
-    ];
+    protected const NON_GLOBAL = ['192.88.99.0/24', '224.0.0.0/4', '2002::/16', '3fff::/20'];
 
     /**
      * The maximum nesting of the JSON a document may contain.
@@ -230,7 +219,7 @@ class Fetcher
             throw new UnusableDocumentException('the document is nested too deeply');
         }
 
-        if (! is_array($data) || ! str_starts_with(ltrim($body, " \t\r\n"), '{')) {
+        if (! is_array($data) || array_is_list($data)) {
             throw new UnusableDocumentException('the document is not a JSON object');
         }
 
@@ -286,23 +275,10 @@ class Fetcher
      */
     protected function isGlobal(string $address): bool
     {
-        $packed = @inet_pton($address);
-
-        if ($packed === false) {
-            return false;
-        }
-
-        // IPv4-mapped (::ffff:0:0/96) and IPv4-compatible (::/96) forms stand for their IPv4 address.
-        if (strlen($packed) === 16 && (str_starts_with($packed, str_repeat("\0", 10)."\xff\xff") || str_starts_with($packed, str_repeat("\0", 12)))) {
-            $address = (string) inet_ntop(substr($packed, 12));
-        }
-
-        if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
-            return ! IpUtils::checkIp($address, static::NON_GLOBAL_IPV4);
-        }
-
         // Only 2000::/3 is global unicast; the rest is reserved, local or multicast.
-        return IpUtils::checkIp($address, '2000::/3') && ! IpUtils::checkIp($address, static::NON_GLOBAL_IPV6);
+        return filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_GLOBAL_RANGE) !== false
+            && (! str_contains($address, ':') || IpUtils::checkIp($address, '2000::/3'))
+            && ! IpUtils::checkIp($address, static::NON_GLOBAL);
     }
 
     /**

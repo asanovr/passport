@@ -5,6 +5,7 @@ namespace Laravel\Passport\ClientMetadata;
 use GuzzleHttp\Psr7\Exception\MalformedUriException;
 use GuzzleHttp\Psr7\Uri;
 use League\Uri\Exceptions\SyntaxError;
+use League\Uri\HostRecord;
 use League\Uri\UriString;
 
 /**
@@ -30,20 +31,12 @@ class Address
      */
     public static function parse(string $url, bool $allowPort = false): self
     {
-        if (! str_starts_with($url, 'https://')) {
-            throw new UnusableDocumentException('the address is not an https address');
-        }
-
         if (strlen($url) > 255) {
             throw new UnusableDocumentException('the address is longer than 255 bytes');
         }
 
-        if (preg_match('/^[\x21-\x7e]+$/D', $url) !== 1) {
-            throw new UnusableDocumentException('the address contains a space, control or non-ASCII character');
-        }
-
-        if (str_contains($url, '\\')) {
-            throw new UnusableDocumentException('the address contains a backslash');
+        if (! UriString::containsRfc3986Chars($url)) {
+            throw new UnusableDocumentException('the address contains a character that a URI may not contain');
         }
 
         try {
@@ -53,18 +46,11 @@ class Address
             throw new UnusableDocumentException('the address is malformed');
         }
 
-        $host = (string) $parts['host'];
-
-        if ($host === '') {
-            throw new UnusableDocumentException('the address has no host');
-        }
-
         if ($parts['user'] !== null) {
             throw new UnusableDocumentException('the address has user information');
         }
 
-        // An empty port ("host:") is read as no port, so it is found in the address itself.
-        if (! $allowPort && ($parts['port'] !== null || str_starts_with(substr($url, 8), $host.':'))) {
+        if (! $allowPort && $parts['port'] !== null) {
             throw new UnusableDocumentException('the address has a port');
         }
 
@@ -102,15 +88,18 @@ class Address
      */
     protected static function isValidHost(string $host): bool
     {
-        if (str_starts_with($host, '[')) {
-            return filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
+        if (HostRecord::isIpv4($host)) {
+            return true;
         }
 
-        // A host made only of numbers is read as an address by the transport, so it has to be one.
-        if (preg_match('/^(\d+|0x[0-9a-f]*)(\.(\d+|0x[0-9a-f]*))*$/Di', $host) === 1) {
-            return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+        // A zone id (a "%" in an IPv6 address) names a network interface of this machine, not a host.
+        if (HostRecord::isIpv6($host)) {
+            return ! str_contains($host, '%');
         }
 
-        return ! str_ends_with($host, '.') && filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false;
+        // League also accepts a percent-encoded host, which it decodes, a trailing dot, and a host made only of
+        // numbers, which the transport reads as an address in a form that no address is written in ("127.1").
+        return HostRecord::isDomain($host) && ! str_contains($host, '%') && ! str_ends_with($host, '.') &&
+            preg_match('/^(\d+|0x[0-9a-f]*)(\.(\d+|0x[0-9a-f]*))*$/Di', $host) !== 1;
     }
 }

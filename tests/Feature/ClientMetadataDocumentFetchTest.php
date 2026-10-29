@@ -61,10 +61,12 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
             'space' => ['https://client.example/a b'],
             'non-ASCII character' => ['https://client.example/ü'],
             'backslash' => ['https://client.example/a\\b'],
+            'a brace' => ['https://client.example/a{b'],
+            'a caret' => ['https://client.example/a^b'],
+            'a backtick' => ['https://client.example/a`b'],
             'no host' => ['https:///oauth/client.json'],
             'a port' => ['https://client.example:8443/oauth/client.json'],
             'the default port' => ['https://client.example:443/oauth/client.json'],
-            'an empty port' => ['https://client.example:/oauth/client.json'],
             'an IPv6 host with a port' => ['https://[2001:db8::1]:8443/oauth/client.json'],
             'no path' => ['https://client.example'],
             'the root path' => ['https://client.example/'],
@@ -131,6 +133,46 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
 
         $this->assertRefused($this->authorize($address));
         $this->assertSame(0, $this->requestsSent());
+    }
+
+    public function testAnAddressWithAnEmptyPortIsFetchedOnceAndRefusedForNotMatchingTheDocument()
+    {
+        Log::spy();
+        $this->publish();
+
+        $this->assertRefused($this->authorize('https://client.example:/oauth/client.json'));
+
+        $this->assertSame(['https://client.example/oauth/client.json'], array_map(fn (Request $request): string => $request->url(), $this->sentRequests()));
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message): bool => str_contains($message, "client_id does not match its address")
+        )->once();
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function documentsThatAreNotObjects(): array
+    {
+        return [
+            'an empty array' => ['[]'],
+            'an empty object' => ['{}'],
+            'a list' => ['["https://client.example/oauth/client.json"]'],
+            'an object with a numeric key' => ['{"0":"https://client.example/oauth/client.json"}'],
+            'a string' => ['"https://client.example/oauth/client.json"'],
+        ];
+    }
+
+    #[DataProvider('documentsThatAreNotObjects')]
+    public function testADocumentThatIsNotAJsonObjectIsRefused(string $body)
+    {
+        Log::spy();
+        $this->publish($body);
+
+        $this->assertRefused($this->authorize());
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message): bool => str_contains($message, 'the document is not a JSON object')
+        )->once();
     }
 
     public function testAHostInCapitalsIsFetchedAndPinnedByItsLowerCaseName()

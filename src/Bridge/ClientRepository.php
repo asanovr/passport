@@ -26,9 +26,7 @@ class ClientRepository implements ClientRepositoryInterface
      */
     public function getClientEntity(string $clientIdentifier): ?ClientEntityInterface
     {
-        $isAddress = Resolver::isAddress($clientIdentifier);
-
-        if ($isAddress && Passport::clientMetadataDocumentsEnabled()) {
+        if (Passport::clientMetadataDocumentsEnabled() && Resolver::isAddress($clientIdentifier)) {
             $record = $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier);
         } else {
             $record = $this->clients->findActive($clientIdentifier);
@@ -38,7 +36,7 @@ class ClientRepository implements ClientRepositoryInterface
             }
 
             // The connections that were made while documents were accepted keep working once they are switched off.
-            if ($record === null && $isAddress && Passport::$clientMetadataDocuments !== null) {
+            if ($record === null && Passport::$clientMetadataDocuments !== null && Resolver::isAddress($clientIdentifier)) {
                 $record = $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier);
             }
         }

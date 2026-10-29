@@ -88,6 +88,7 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
             'TEST-NET-2' => ['198.51.100.7'],
             'TEST-NET-3' => ['203.0.113.9'],
             'multicast' => ['224.0.0.251'],
+            '6to4 relay anycast' => ['192.88.99.1'],
             'the unspecified IPv6 address' => ['::'],
             'the IPv6 loopback' => ['::1'],
             'IPv6 link-local' => ['fe80::1'],
@@ -98,7 +99,9 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
             '6to4' => ['2002:808:808::1'],
             'Teredo' => ['2001::1'],
             'IPv6 documentation' => ['2001:db8::1'],
+            'the 2024 IPv6 documentation range' => ['3fff::1'],
             'IPv6 multicast' => ['ff02::1'],
+            'an IPv4-mapped public address' => ['::ffff:93.184.216.34'],
             'an IPv4-mapped private address' => ['::ffff:10.0.0.1'],
             'an IPv4-mapped loopback address' => ['::ffff:127.0.0.1'],
             'an IPv4-mapped metadata service address' => ['::ffff:a9fe:a9fe'],
@@ -131,7 +134,6 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
             'next to 198.18/15' => [['198.20.0.1']],
             'a public IPv6 address' => [['2606:4700::1111']],
             'both families' => [['93.184.216.34', '2606:4700::1111']],
-            'an IPv4-mapped public address' => [['::ffff:93.184.216.34']],
         ];
     }
 
