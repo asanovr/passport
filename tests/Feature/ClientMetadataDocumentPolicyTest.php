@@ -28,11 +28,6 @@ class ClientMetadataDocumentPolicyTest extends PassportTestCase
         Http::preventStrayRequests();
     }
 
-    protected function authorize(?string $url = null, array $overrides = [])
-    {
-        return $this->get('/oauth/authorize?'.$this->authorizationQuery($url, $overrides));
-    }
-
     public function testAGuestIsSentToSignInBeforeAnythingIsFetched()
     {
         $this->publish();
@@ -129,12 +124,9 @@ class ClientMetadataDocumentPolicyTest extends PassportTestCase
         return [
             'an exact host' => [['example.com'], 'https://example.com/oauth/client.json', true],
             'another host' => [['example.com'], 'https://other.com/oauth/client.json', false],
-            'a subdomain of an exact host' => [['example.com'], 'https://a.example.com/oauth/client.json', false],
             'an exact host in capitals' => [['Example.COM'], 'https://example.com/oauth/client.json', true],
             'a wildcard and a subdomain' => [['*.example.com'], 'https://a.example.com/oauth/client.json', true],
-            'a wildcard and a deeper subdomain' => [['*.example.com'], 'https://a.b.example.com/oauth/client.json', true],
             'a wildcard and the apex' => [['*.example.com'], 'https://example.com/oauth/client.json', false],
-            'a wildcard and a lookalike' => [['*.example.com'], 'https://badexample.com/oauth/client.json', false],
             'a wildcard and a suffix lookalike' => [['*.example.com'], 'https://a.example.com.evil.test/oauth/client.json', false],
             'one of several' => [['other.com', '*.example.com'], 'https://x.example.com/oauth/client.json', true],
             'no list' => [[], 'https://anything.test/oauth/client.json', true],

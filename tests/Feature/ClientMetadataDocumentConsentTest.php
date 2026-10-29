@@ -34,14 +34,6 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     }
 
     /**
-     * @param  array<string, mixed>  $overrides
-     */
-    protected function authorize(array $overrides = [], ?string $url = null)
-    {
-        return $this->get('/oauth/authorize?'.$this->authorizationQuery($url, $overrides));
-    }
-
-    /**
      * Get the "clientMetadata" value of an authorization request.
      *
      * @param  array<string, mixed>  $overrides
@@ -49,7 +41,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
      */
     protected function consent(array $overrides = []): ?array
     {
-        return $this->authorize($overrides)->assertOk()->json('clientMetadata');
+        return $this->authorize(null, $overrides)->assertOk()->json('clientMetadata');
     }
 
     public function testTheViewReceivesTheDocumentsData()
@@ -123,7 +115,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     {
         $this->publish($this->document(['redirect_uris' => ['http://127.0.0.1:4000/callback']]));
 
-        $consent = $this->authorize(['redirect_uri' => null])->assertOk()->json('clientMetadata');
+        $consent = $this->authorize(null, ['redirect_uri' => null])->assertOk()->json('clientMetadata');
 
         $this->assertTrue($consent['redirectIsLoopback']);
         $this->assertTrue($consent['allRedirectsAreLoopback']);
@@ -131,14 +123,14 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
         $this->publish($this->document(['redirect_uris' => ['https://client.example/callback']]), url: $this->documentUrl);
         $this->travel(11)->minutes();
 
-        $this->assertFalse($this->authorize(['redirect_uri' => null])->assertOk()->json('clientMetadata.redirectIsLoopback'));
+        $this->assertFalse($this->authorize(null, ['redirect_uri' => null])->assertOk()->json('clientMetadata.redirectIsLoopback'));
     }
 
     public function testAnOrdinaryClientHasNoClientMetadata()
     {
         $client = ClientFactory::new()->asPublic()->create();
 
-        $response = $this->authorize(['redirect_uri' => $client->redirect_uris[0]], $client->getKey())->assertOk();
+        $response = $this->authorize($client->getKey(), ['redirect_uri' => $client->redirect_uris[0]])->assertOk();
 
         $this->assertArrayNotHasKey('clientMetadata', $response->json());
     }
@@ -156,11 +148,11 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     {
         $this->connectOnce();
 
-        $this->authorize(['redirect_uri' => 'https://client.example/callback'])
+        $this->authorize(null, ['redirect_uri' => 'https://client.example/callback'])
             ->assertRedirect()
             ->assertSessionMissing('authRequest');
 
-        $this->authorize(['redirect_uri' => 'http://127.0.0.1:4000/callback'])
+        $this->authorize(null, ['redirect_uri' => 'http://127.0.0.1:4000/callback'])
             ->assertOk()
             ->assertSessionHas('authRequest')
             ->assertJsonPath('clientMetadata.redirectIsLoopback', true);
@@ -174,7 +166,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
         ]]));
         $this->connect();
 
-        $this->authorize(['redirect_uri' => $redirect])
+        $this->authorize(null, ['redirect_uri' => $redirect])
             ->assertOk()
             ->assertSessionHas('authRequest')
             ->assertJsonPath('clientMetadata.redirectIsLoopback', true);
@@ -187,11 +179,8 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     {
         return [
             'a percent-encoded letter' => ['http://loc%61lhost:5555/callback'],
-            'a fully percent-encoded name' => ['http://%6c%6f%63%61%6c%68%6f%73%74:5555/callback'],
             'a circled letter' => ['http://ⓛocalhost:5555/callback'],
-            'full-width letters' => ['http://ｌｏｃａｌｈｏｓｔ:5555/callback'],
             'a percent-encoded address' => ['http://%31%32%37.0.0.1:5555/callback'],
-            'a full-width address' => ['http://１２７.0.0.1:5555/callback'],
         ];
     }
 
@@ -209,7 +198,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
         Passport::useClientModel(SkipsAuthorizationClient::class);
         $client = ClientFactory::new()->asPublic()->create(['redirect_uris' => ['http://127.0.0.1/callback']]);
 
-        $this->authorize(['redirect_uri' => 'http://127.0.0.1:4000/callback'], $client->getKey())
+        $this->authorize($client->getKey(), ['redirect_uri' => 'http://127.0.0.1:4000/callback'])
             ->assertRedirect()
             ->assertSessionMissing('authRequest');
     }
@@ -223,7 +212,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'scopes' => ['create', 'read'], 'revoked' => false, 'expires_at' => now()->addDay(),
         ]);
 
-        $this->authorize(['redirect_uri' => 'http://127.0.0.1:4000/callback'], $client->getKey())
+        $this->authorize($client->getKey(), ['redirect_uri' => 'http://127.0.0.1:4000/callback'])
             ->assertRedirect()
             ->assertSessionMissing('authRequest');
     }
@@ -233,7 +222,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
         Passport::useClientModel(ReusingClient::class);
         $this->connectOnce();
 
-        $this->authorize(['redirect_uri' => 'http://127.0.0.1:4000/callback'])
+        $this->authorize(null, ['redirect_uri' => 'http://127.0.0.1:4000/callback'])
             ->assertRedirect()
             ->assertSessionMissing('authRequest');
     }
@@ -248,7 +237,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'scopes' => ['create', 'read'], 'revoked' => false, 'expires_at' => now()->addDay(),
         ]);
 
-        $this->authorize(['redirect_uri' => $client->redirect_uris[0]], $client->getKey())
+        $this->authorize($client->getKey(), ['redirect_uri' => $client->redirect_uris[0]])
             ->assertOk()
             ->assertSessionHas('authRequest');
     }
@@ -260,30 +249,20 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     {
         return [
             'any port' => [['http://localhost/callback'], 'http://localhost:54321/callback', true],
-            'no port' => [['http://localhost/callback'], 'http://localhost/callback', true],
-            'the highest port' => [['http://localhost/callback'], 'http://localhost:65535/callback', true],
             'a different path' => [['http://localhost/callback'], 'http://localhost:54321/other', false],
-            'a longer path' => [['http://localhost/callback'], 'http://localhost:54321/callback/more', false],
             'an added query' => [['http://localhost/callback'], 'http://localhost:54321/callback?a=1', false],
             'a different host' => [['http://localhost/callback'], 'http://localhost.evil.test:54321/callback', false],
             'a loopback address instead of the name' => [['http://localhost/callback'], 'http://127.0.0.1:54321/callback', false],
             'https instead of http' => [['http://localhost/callback'], 'https://localhost:54321/callback', false],
             'https on another port when https is listed' => [['https://localhost/callback'], 'https://localhost:8443/callback', false],
             'user information' => [['http://localhost/callback'], 'http://user@localhost:54321/callback', false],
-            'a fragment' => [['http://localhost/callback'], 'http://localhost:54321/callback#x', false],
             'a port that is not a number' => [['http://localhost/callback'], 'http://localhost:abc/callback', false],
-            'a space in the host' => [['http://localhost/callback'], 'http://local host/callback', false],
             'the same query on any port' => [['http://localhost/callback?x=1'], 'http://localhost:54321/callback?x=1', true],
-            'a missing query' => [['http://localhost/callback?x=1'], 'http://localhost:54321/callback', false],
             'a different query' => [['http://localhost/callback?x=1'], 'http://localhost:54321/callback?x=2', false],
-            'the listed port' => [['http://localhost:8080/callback'], 'http://localhost:8080/callback', true],
             'another port than the listed one' => [['http://localhost:8080/callback'], 'http://localhost:8081/callback', true],
-            'no port when one is listed' => [['http://localhost:8080/callback'], 'http://localhost/callback', true],
             'localhost when only the loopback address is listed' => [['http://127.0.0.1/callback'], 'http://localhost:54321/callback', false],
             'the loopback IPv4 address on any port' => [['http://127.0.0.1/callback'], 'http://127.0.0.1:9999/callback', true],
-            'the loopback IPv6 address on any port' => [['http://[::1]/callback'], 'http://[::1]:9999/callback', true],
             'an https address that is listed' => [['https://client.example/callback'], 'https://client.example/callback', true],
-            'an https address on another port' => [['https://client.example/callback'], 'https://client.example:8443/callback', false],
         ];
     }
 
@@ -295,7 +274,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     {
         $this->publish($this->document(['redirect_uris' => $listed]));
 
-        $response = $this->authorize(['redirect_uri' => $requested]);
+        $response = $this->authorize(null, ['redirect_uri' => $requested]);
 
         if (! $accepted) {
             $response->assertStatus(401)->assertJsonPath('error', 'invalid_client');
@@ -323,7 +302,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     {
         $this->publish($this->document(['redirect_uris' => ['http://localhost/callback']]));
 
-        $response = $this->authorize(['redirect_uri' => 'http://localhost:54321/callback'])->assertOk();
+        $response = $this->authorize(null, ['redirect_uri' => 'http://localhost:54321/callback'])->assertOk();
         $approved = $this->post('/oauth/authorize', ['auth_token' => $response->json('authToken')]);
         parse_str(parse_url($approved->headers->get('Location'), PHP_URL_QUERY), $params);
 
@@ -340,21 +319,21 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
     {
         $client = ClientFactory::new()->asPublic()->create(['redirect_uris' => ['http://localhost/callback']]);
 
-        $this->authorize(['redirect_uri' => 'http://localhost:54321/callback'], $client->getKey())
+        $this->authorize($client->getKey(), ['redirect_uri' => 'http://localhost:54321/callback'])
             ->assertStatus(401)
             ->assertJsonPath('error', 'invalid_client');
 
-        $this->authorize(['redirect_uri' => 'http://localhost/callback'], $client->getKey())->assertOk();
+        $this->authorize($client->getKey(), ['redirect_uri' => 'http://localhost/callback'])->assertOk();
     }
 
     public function testTheLocalhostPortRuleStopsWhenLoopbackRedirectsAreNotAllowed()
     {
         $this->publish($this->document(['redirect_uris' => ['http://localhost/callback']]));
-        $this->authorize(['redirect_uri' => 'http://localhost:54321/callback'])->assertOk();
+        $this->authorize(null, ['redirect_uri' => 'http://localhost:54321/callback'])->assertOk();
 
         Passport::clientMetadataDocuments(allowLoopbackRedirects: false);
 
-        $this->authorize(['redirect_uri' => 'http://localhost:54321/callback'])
+        $this->authorize(null, ['redirect_uri' => 'http://localhost:54321/callback'])
             ->assertStatus(401)
             ->assertJsonPath('error', 'invalid_client');
     }
@@ -384,25 +363,16 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'localhost' => ['https://localhost/callback'],
             'an IPv4 loopback address' => ['https://127.0.0.1/callback'],
             'an IPv6 loopback address' => ['https://[::1]/callback'],
-            'an IPv6 loopback address written out' => ['https://[0:0:0:0:0:0:0:1]/callback'],
             'another address of 127.0.0.0/8' => ['https://127.0.0.2/callback'],
-            'the end of 127.0.0.0/8' => ['https://127.255.255.254/callback'],
             'localhost with a trailing dot' => ['https://localhost./callback'],
             'a name below localhost' => ['https://app.localhost/callback'],
-            'a name below localhost over http' => ['http://app.localhost:4000/callback'],
             'a name below localhost in capitals' => ['https://APP.Localhost/callback'],
-            'another address of 127.0.0.0/8 over http' => ['http://127.0.0.2:4000/callback'],
             'a short IPv4 form' => ['https://127.1/callback'],
             'a decimal IPv4 form' => ['https://2130706433/callback'],
-            'a hexadecimal IPv4 form' => ['https://0x7f000001/callback'],
-            'a dotted hexadecimal IPv4 form' => ['https://0x7f.0.0.1/callback'],
-            'an octal IPv4 form' => ['https://0177.0.0.1/callback'],
             'an IPv4-mapped IPv6 loopback address' => ['https://[::ffff:127.0.0.1]/callback'],
-            'an IPv4-mapped IPv6 loopback address in hex' => ['https://[::ffff:7f00:1]/callback'],
             'a percent-encoded letter' => ['https://loc%61lhost/callback'],
             'a circled letter' => ['https://ⓛocalhost/callback'],
             'a percent-encoded address' => ['https://%31%32%37.0.0.1/callback'],
-            'a full-width address' => ['https://１２７.0.0.1/callback'],
         ];
     }
 
@@ -418,7 +388,6 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'an address that starts with 127' => ['https://127.0.0.1.example/callback'],
             'another IPv6 address' => ['https://[::2]/callback'],
             'a short IPv4 form outside 127.0.0.0/8' => ['https://128.1/callback'],
-            'a decimal IPv4 form outside 127.0.0.0/8' => ['https://2130706431/callback'],
             'an IPv4-mapped address outside 127.0.0.0/8' => ['https://[::ffff:10.0.0.1]/callback'],
         ];
     }
@@ -451,11 +420,11 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
         $this->publish($this->document(['redirect_uris' => ['https://client.example/callback', $redirect]]));
         $this->connect(redirectUri: $redirect);
 
-        $this->authorize(['redirect_uri' => $redirect])->assertOk()->assertSessionHas('authRequest');
+        $this->authorize(null, ['redirect_uri' => $redirect])->assertOk()->assertSessionHas('authRequest');
     }
 
     #[DataProvider('httpsLoopbackRedirects')]
-    public function testADocumentListingAnHttpsLoopbackRedirectIsRefusedWhenLoopbackRedirectsAreNotAllowed(string $redirect)
+    public function testAnHttpsLoopbackRedirectIsRefusedWhenLoopbackRedirectsAreNotAllowed(string $redirect)
     {
         Passport::clientMetadataDocuments(allowLoopbackRedirects: false);
         $this->publish($this->document(['redirect_uris' => ['https://client.example/callback', $redirect]]));

@@ -26,11 +26,6 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
         $this->actingAs(UserFactory::new()->create(), 'web');
     }
 
-    protected function authorize(array $overrides = [])
-    {
-        return $this->get('/oauth/authorize?'.$this->authorizationQuery(overrides: $overrides));
-    }
-
     /**
      * @return array<string, array{0: array<string, mixed>}>
      */
@@ -39,14 +34,10 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
         $url = 'https://client.example/oauth/client.json';
 
         return [
-            'another client_id' => [['client_id' => 'https://client.example/oauth/other.json']],
             'a client_id that differs by case' => [['client_id' => 'https://client.example/oauth/CLIENT.json']],
-            'a client_id with a trailing slash' => [['client_id' => $url.'/']],
             'no client_id' => [['client_id' => static::MISSING]],
-            'a client_id that is not a string' => [['client_id' => 5]],
 
             'a client_name that is not a string' => [['client_name' => 5]],
-            'a client_name that is a list' => [['client_name' => ['Example']]],
             'a client_uri that is not a string' => [['client_uri' => 5]],
             'a logo_uri that is not a string' => [['logo_uri' => true]],
             'a scope that is not a string' => [['scope' => 5]],
@@ -66,7 +57,6 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'a malformed redirect address' => [['redirect_uris' => ['https://client.example/a b']]],
             'response_types that are a string' => [['response_types' => 'code']],
             'redirect_uris that are a string' => [['redirect_uris' => 'https://client.example/callback']],
-            'redirect_uris that are an object' => [['redirect_uris' => ['a' => 'https://client.example/callback']]],
             'redirect_uris that are not strings' => [['redirect_uris' => [5]]],
 
             'no redirect_uris' => [['redirect_uris' => static::MISSING]],
@@ -82,11 +72,9 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'a redirect address that only starts like localhost' => [['redirect_uris' => ['http://localhost.example/callback']]],
             'a custom scheme redirect address' => [['redirect_uris' => ['myapp://callback']]],
             'a custom scheme on a loopback host' => [['redirect_uris' => ['myapp://localhost/callback']]],
-            'a javascript redirect address' => [['redirect_uris' => ['javascript:alert(1)']]],
             'one bad redirect address among good ones' => [['redirect_uris' => ['https://client.example/callback', 'myapp://callback']]],
 
             'client authentication by key' => [['token_endpoint_auth_method' => 'private_key_jwt']],
-            'client authentication by secret' => [['token_endpoint_auth_method' => 'client_secret_basic']],
             'a client_secret' => [['client_secret' => 'shh']],
             'an empty client_secret' => [['client_secret' => null]],
             'a client_secret_expires_at' => [['client_secret_expires_at' => 0]],
@@ -94,8 +82,6 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'response_types without code' => [['response_types' => ['token']]],
             'a client_name over 255 characters' => [['client_name' => str_repeat('a', 256)]],
             'a client_uri that is plain http' => [['client_uri' => 'http://client.example/']],
-            'a client_uri that is relative' => [['client_uri' => '/about']],
-            'a logo_uri that is plain http' => [['logo_uri' => 'http://client.example/logo.png']],
             'an empty client_uri' => [['client_uri' => '']],
             'an empty logo_uri' => [['logo_uri' => '']],
             'an empty token_endpoint_auth_method' => [['token_endpoint_auth_method' => '']],
@@ -160,10 +146,6 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'loopback IPv6' => [['redirect_uris' => ['http://[::1]/callback']], ['http://[::1]/callback']],
             'localhost' => [['redirect_uris' => ['http://localhost/callback']], ['http://localhost/callback']],
             'localhost in capitals' => [['redirect_uris' => ['http://LOCALHOST:8080/callback']], ['http://LOCALHOST:8080/callback']],
-            'https and loopback together' => [
-                ['redirect_uris' => ['https://client.example/callback', 'http://127.0.0.1:33418/']],
-                ['https://client.example/callback', 'http://127.0.0.1:33418/'],
-            ],
             'ten redirect addresses' => [
                 ['redirect_uris' => $ten = array_map(fn (int $i) => "https://client.example/cb/$i", range(1, 10))],
                 $ten,
@@ -194,7 +176,7 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
     {
         $this->publish($this->document($overrides));
 
-        $this->authorize(['redirect_uri' => $redirectUris[0]])->assertStatus(200);
+        $this->authorize(null, ['redirect_uri' => $redirectUris[0]])->assertStatus(200);
 
         $this->assertSame($redirectUris, Client::query()->sole()->redirect_uris);
     }

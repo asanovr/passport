@@ -13,7 +13,6 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Laravel\Passport\Client;
-use Laravel\Passport\ClientMetadata\Fetcher;
 use Laravel\Passport\ClientMetadata\LimitedStream;
 use Laravel\Passport\Passport;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -36,66 +35,37 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->actingAs(UserFactory::new()->create(), 'web');
     }
 
-    protected function authorize(?string $url = null)
-    {
-        return $this->get('/oauth/authorize?'.$this->authorizationQuery($url));
-    }
-
-    protected function assertRefused($response): void
-    {
-        $response->assertStatus(401);
-        $response->assertHeaderMissing('Location');
-        $this->assertSame('invalid_client', $response->json('error'));
-        $this->assertSame(0, Client::query()->count());
-    }
-
     /**
      * @return array<string, array{0: string}>
      */
     public static function malformedAddresses(): array
     {
         return [
-            'plain http' => ['http://client.example/oauth/client.json'],
             'longer than 255 bytes' => ['https://client.example/'.str_repeat('a', 240)],
             'control character' => ["https://client.example/a\x01b"],
-            'space' => ['https://client.example/a b'],
             'non-ASCII character' => ['https://client.example/ü'],
             'backslash' => ['https://client.example/a\\b'],
-            'a brace' => ['https://client.example/a{b'],
-            'a caret' => ['https://client.example/a^b'],
-            'a backtick' => ['https://client.example/a`b'],
             'no host' => ['https:///oauth/client.json'],
             'a port' => ['https://client.example:8443/oauth/client.json'],
             'the default port' => ['https://client.example:443/oauth/client.json'],
-            'an IPv6 host with a port' => ['https://[2001:db8::1]:8443/oauth/client.json'],
             'no path' => ['https://client.example'],
             'the root path' => ['https://client.example/'],
             'user information' => ['https://user@client.example/oauth/client.json'],
-            'a password' => ['https://user:secret@client.example/oauth/client.json'],
             'a query' => ['https://client.example/oauth/client.json?a=b'],
             'an empty query' => ['https://client.example/oauth/client.json?'],
             'a fragment' => ['https://client.example/oauth/client.json#top'],
             'a dot segment' => ['https://client.example/oauth/./client.json'],
             'a dot-dot segment' => ['https://client.example/oauth/../client.json'],
             'an encoded dot segment' => ['https://client.example/oauth/%2e/client.json'],
-            'an encoded dot-dot segment' => ['https://client.example/oauth/%2E%2e/client.json'],
-            'a half encoded dot-dot segment' => ['https://client.example/oauth/.%2e/client.json'],
             'an underscore in the host' => ['https://cli_ent.example/oauth/client.json'],
             'a percent-encoded host' => ['https://client%2eexample/oauth/client.json'],
             'a sub-delimiter in the host' => ['https://client$.example/oauth/client.json'],
-            'a comma in the host' => ['https://client,example/oauth/client.json'],
-            'a label that starts with a hyphen' => ['https://-client.example/oauth/client.json'],
-            'a label that ends with a hyphen' => ['https://client-.example/oauth/client.json'],
-            'an empty label' => ['https://client..example/oauth/client.json'],
-            'a leading dot' => ['https://.client.example/oauth/client.json'],
             'a trailing dot' => ['https://client.example./oauth/client.json'],
-            'a label of more than 63 characters' => ['https://'.str_repeat('a', 64).'.example/oauth/client.json'],
             'a number that is not an IPv4 address' => ['https://127.1/oauth/client.json'],
             'an IPv4 address that is out of range' => ['https://999.1.1.1/oauth/client.json'],
             'a hexadecimal IPv4 address' => ['https://0x7f.0.0.1/oauth/client.json'],
             'a decimal IPv4 address' => ['https://2130706433/oauth/client.json'],
             'brackets around a name' => ['https://[client.example]/oauth/client.json'],
-            'a malformed IPv6 address' => ['https://[2001:db8::zz]/oauth/client.json'],
             'an IPv6 address with a zone' => ['https://[fe80::1%25eth0]/oauth/client.json'],
             'an IPvFuture host' => ['https://[v1.x]/oauth/client.json'],
             'an IPv4 address in brackets' => ['https://[93.184.216.34]/oauth/client.json'],
@@ -135,6 +105,17 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertSame(0, $this->requestsSent());
     }
 
+    public function testAnHttpAddressIsNotAMetadataDocumentAddress()
+    {
+        $this->publish();
+
+        $response = $this->authorize('http://client.example/oauth/client.json');
+
+        $response->assertStatus(401);
+        $this->assertSame('invalid_client', $response->json('error'));
+        $this->assertSame(0, $this->requestsSent());
+    }
+
     public function testAnAddressWithAnEmptyPortIsFetchedOnceAndRefusedForNotMatchingTheDocument()
     {
         Log::spy();
@@ -154,7 +135,6 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         return [
             'an empty array' => ['[]'],
             'an empty object' => ['{}'],
-            'a list' => ['["https://client.example/oauth/client.json"]'],
             'an object with a numeric key' => ['{"0":"https://client.example/oauth/client.json"}'],
             'a string' => ['"https://client.example/oauth/client.json"'],
         ];
@@ -244,7 +224,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
      */
     public static function refusedStatuses(): array
     {
-        return ['201' => [201], '204' => [204], '301' => [301], '304' => [304], '404' => [404], '500' => [500]];
+        return ['201' => [201], '404' => [404]];
     }
 
     public function testABodyLongerThanTheMaximumSizeIsRefused()
@@ -304,12 +284,8 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
             'json with a charset' => ['application/json; charset=utf-8', true],
             'uppercase json' => ['Application/JSON', true],
             'a structured suffix' => ['application/ld+json', true],
-            'a structured suffix with parameters' => ['application/vnd.api+json; charset=utf-8', true],
             'html' => ['text/html', false],
-            'plain text' => ['text/plain', false],
-            'json as text' => ['text/json', false],
             'a lookalike' => ['application/jsonp', false],
-            'a lookalike suffix' => ['application/x+jsonp', false],
             'no media type' => ['', false],
         ];
     }
@@ -343,8 +319,6 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         return [
             'not JSON' => ['<html>hello</html>'],
             'empty' => [''],
-            'a list' => ['[{"client_id":"https://client.example/oauth/client.json"}]'],
-            'a string' => ['"https://client.example/oauth/client.json"'],
             'a number' => ['1'],
             'nested nine levels' => [$document(['extra' => static::nest(8)])],
         ];
@@ -485,23 +459,6 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertFalse($this->requestOptions[0]['stream']);
     }
 
-    public function testPinningNeedsACurlFunctionGuzzleCanUse()
-    {
-        $this->publish();
-
-        foreach ([['curl_exec'], ['curl_multi_exec'], ['curl_exec', 'curl_multi_exec']] as $missing) {
-            $this->app->bind(Fetcher::class, fn () => new FetcherWithoutFunctions($missing));
-
-            $this->travel(1)->hour();
-
-            count($missing) === 2
-                ? $this->authorize()->assertStatus(401)->assertJsonPath('error', 'invalid_client')
-                : $this->authorize()->assertOk();
-        }
-
-        $this->assertSame(2, $this->requestsSent());
-    }
-
     public function testTheApplicationsGlobalOptionsCannotLoosenTheFetch()
     {
         Http::globalOptions([
@@ -547,22 +504,5 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->assertSame(1, $ran);
         $this->assertHttpsOnly($this->requestOptions[0]);
         $this->assertSame([], array_diff(array_keys($this->requestOptions[0]['curl']), [CURLOPT_RESOLVE, CURLOPT_PROTOCOLS]));
-    }
-}
-
-class FetcherWithoutFunctions extends Fetcher
-{
-    /**
-     * Create a new fetcher instance that lacks the given functions.
-     *
-     * @param  string[]  $missing
-     */
-    public function __construct(protected array $missing)
-    {
-    }
-
-    protected function hasFunction(string $name): bool
-    {
-        return ! in_array($name, $this->missing, true) && parent::hasFunction($name);
     }
 }

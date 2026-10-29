@@ -330,7 +330,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame('Example Agent', Client::query()->sole()->name);
     }
 
-    public function testARequestThatCreatesARecordNextToAnOlderOneContinuesWithTheOlderAndRemovesItsOwn()
+    public function testARecordCreatedNextToAnOlderOneYieldsToItAndIsRemoved()
     {
         Passport::clientMetadataDocuments();
         $this->publish();
@@ -518,7 +518,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame(0, $this->requestsSent());
     }
 
-    public function testAnApplicationThatNeverEnabledTheModeAndLacksTheColumnCompletesOrdinaryFlowsUnderStrictModels()
+    public function testAnApplicationWithoutTheModeOrTheColumnCompletesOrdinaryFlowsUnderStrictModels()
     {
         $this->dropTheColumn();
         Model::preventAccessingMissingAttributes();
@@ -670,7 +670,7 @@ class ClientMetadataDocumentTest extends PassportTestCase
         $this->assertSame(0, Client::query()->count());
     }
 
-    public function testAnAddressThatADatabaseCannotTellApartFromAnotherIsRefusedAndTheOtherRecordIsLeftAlone()
+    public function testAnAddressThatDiffersOnlyInCaseIsRefusedAndTheOtherRecordIsLeftAlone()
     {
         // A column that, like MySQL's default, matches addresses regardless of case.
         $this->dropTheColumn();

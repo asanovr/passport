@@ -7,6 +7,8 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
+use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Throwable;
 use Workbench\App\Models\User;
@@ -14,9 +16,6 @@ use Workbench\Database\Factories\UserFactory;
 
 trait InteractsWithClientMetadataDocuments
 {
-    /**
-     * The value that leaves a field out of a document.
-     */
     protected const MISSING = '@@missing@@';
 
     protected string $documentUrl = 'https://client.example/oauth/client.json';
@@ -24,22 +23,15 @@ trait InteractsWithClientMetadataDocuments
     protected string $codeVerifier;
 
     /**
-     * The answers of the servers that publish documents, by address.
-     *
      * @var array<string, array{0: array<string, mixed>|string, 1: int, 2: array<string, string>}>
      */
     protected array $published = [];
 
     protected bool $fakesDocuments = false;
 
-    /**
-     * The exception the servers that publish documents fail with, instead of answering.
-     */
     protected ?Throwable $failure = null;
 
     /**
-     * The options of the requests that left the server, in the order they were sent.
-     *
      * @var array<int, array<string, mixed>>
      */
     protected array $requestOptions = [];
@@ -121,6 +113,28 @@ trait InteractsWithClientMetadataDocuments
     }
 
     /**
+     * Send the authorization request of the given client id.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    protected function authorize(?string $clientId = null, array $overrides = []): TestResponse
+    {
+        return $this->get('/oauth/authorize?'.$this->authorizationQuery($clientId, $overrides));
+    }
+
+    /**
+     * Assert that the response refuses the client and that nothing was stored for it.
+     */
+    protected function assertRefused(TestResponse $response): void
+    {
+        $response->assertStatus(401);
+        $response->assertHeaderMissing('Location');
+        $this->assertSame('invalid_client', $response->json('error'));
+        $this->assertSame("The client's metadata document could not be used.", $response->json('error_description'));
+        $this->assertSame(0, Client::query()->count());
+    }
+
+    /**
      * Assert that the options of a request that left the server allow https and nothing else.
      *
      * Guzzle has an option for it since 7.11, and a cURL option does it before that.
@@ -156,6 +170,9 @@ trait InteractsWithClientMetadataDocuments
         return Http::recorded()->map(fn (array $pair): Request => $pair[0])->all();
     }
 
+    /**
+     * Sign in a new user.
+     */
     protected function signIn(): User
     {
         $this->actingAs($user = UserFactory::new()->create(), 'web');
