@@ -4,7 +4,7 @@ namespace Laravel\Passport\ClientMetadata;
 
 use League\Uri\Exceptions\SyntaxError;
 use League\Uri\IPv4\Converter;
-use League\Uri\UriString;
+use League\Uri\Uri;
 use Symfony\Component\HttpFoundation\IpUtils;
 
 class Loopback
@@ -18,7 +18,7 @@ class Loopback
     public static function isRedirect(string $uri): bool
     {
         try {
-            $host = strtolower(rtrim((string) UriString::parse($uri)['host'], '.'));
+            $host = strtolower(rtrim(Uri::new($uri)->getHost() ?? '', '.'));
         } catch (SyntaxError) {
             return false;
         }

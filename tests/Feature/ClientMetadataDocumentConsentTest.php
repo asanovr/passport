@@ -166,6 +166,35 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             ->assertJsonPath('clientMetadata.redirectIsLoopback', true);
     }
 
+    #[DataProvider('disguisedLoopbackRedirects')]
+    public function testALiveTokenIsNotEnoughForADisguisedLoopbackRedirect(string $redirect)
+    {
+        $this->publish($this->document(['redirect_uris' => [
+            'https://client.example/callback', 'http://127.0.0.1/callback', 'http://localhost/callback',
+        ]]));
+        $this->connect();
+
+        $this->authorize(['redirect_uri' => $redirect])
+            ->assertOk()
+            ->assertSessionHas('authRequest')
+            ->assertJsonPath('clientMetadata.redirectIsLoopback', true);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function disguisedLoopbackRedirects(): array
+    {
+        return [
+            'a percent-encoded letter' => ['http://loc%61lhost:5555/callback'],
+            'a fully percent-encoded name' => ['http://%6c%6f%63%61%6c%68%6f%73%74:5555/callback'],
+            'a circled letter' => ['http://ⓛocalhost:5555/callback'],
+            'full-width letters' => ['http://ｌｏｃａｌｈｏｓｔ:5555/callback'],
+            'a percent-encoded address' => ['http://%31%32%37.0.0.1:5555/callback'],
+            'a full-width address' => ['http://１２７.0.0.1:5555/callback'],
+        ];
+    }
+
     public function testTheFirstPartyPatternDoesNotApproveADocumentIdentifiedClientSilently()
     {
         Passport::useClientModel(SkipsAuthorizationClient::class);
@@ -370,6 +399,10 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'an octal IPv4 form' => ['https://0177.0.0.1/callback'],
             'an IPv4-mapped IPv6 loopback address' => ['https://[::ffff:127.0.0.1]/callback'],
             'an IPv4-mapped IPv6 loopback address in hex' => ['https://[::ffff:7f00:1]/callback'],
+            'a percent-encoded letter' => ['https://loc%61lhost/callback'],
+            'a circled letter' => ['https://ⓛocalhost/callback'],
+            'a percent-encoded address' => ['https://%31%32%37.0.0.1/callback'],
+            'a full-width address' => ['https://１２７.0.0.1/callback'],
         ];
     }
 

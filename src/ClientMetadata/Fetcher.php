@@ -175,7 +175,12 @@ class Fetcher
         // A response object invents "Cache-Control: no-cache, private" when it has none, so the header is read as sent.
         $directives = new HeaderBag(['Cache-Control' => $response->header('Cache-Control')]);
 
-        $headers = $response->headers();
+        // Only the headers that decide the lifetime are given to the response object, which parses every cookie it is given.
+        $headers = array_filter([
+            'Cache-Control' => $response->header('Cache-Control'),
+            'Expires' => $response->header('Expires'),
+            'Date' => $response->header('Date'),
+        ], fn (string $value): bool => $value !== '');
 
         // A "Date" that is missing or that Symfony cannot read is replaced by the time of receipt (RFC 9110, 6.6.1).
         if (DateTimeImmutable::createFromFormat(DATE_RFC2822, $response->header('Date')) === false) {

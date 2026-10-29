@@ -106,6 +106,9 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
             's-maxage beats max-age' => [['Cache-Control' => 'max-age=300, s-maxage=200'], 200],
             's-maxage less the Age' => [['Cache-Control' => 's-maxage=300', 'Age' => '100'], 200],
             'an invalid max-age beats Expires' => [['Cache-Control' => 'max-age=soon', 'Expires' => $expires(900)], 60],
+            'a Set-Cookie without a name' => [['Cache-Control' => 'max-age=300', 'Set-Cookie' => '=x'], 300],
+            'a Set-Cookie with an unreadable Expires' => [['Cache-Control' => 'max-age=300', 'Set-Cookie' => 'a=b; Expires=garbage'], 300],
+            'a Set-Cookie with an unknown SameSite' => [['Cache-Control' => 'max-age=300', 'Set-Cookie' => 'a=b; SameSite=Bogus'], 300],
         ];
     }
 

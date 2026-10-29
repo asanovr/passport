@@ -13,8 +13,8 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Laravel\Passport\Client;
-use Laravel\Passport\ClientMetadata\LimitedStream;
 use Laravel\Passport\ClientMetadata\Fetcher;
+use Laravel\Passport\ClientMetadata\LimitedStream;
 use Laravel\Passport\Passport;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Workbench\Database\Factories\UserFactory;
@@ -144,7 +144,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
 
         $this->assertSame(['https://client.example/oauth/client.json'], array_map(fn (Request $request): string => $request->url(), $this->sentRequests()));
         Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message): bool => str_contains($message, "client_id does not match its address")
+            fn (string $message): bool => str_contains($message, 'client_id does not match its address')
         )->once();
     }
 
