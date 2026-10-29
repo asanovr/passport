@@ -183,7 +183,7 @@ class Client extends Model
     public function firstParty(): bool
     {
         // A client that is identified by its metadata document is published by a stranger.
-        if (! empty($this->attributes['metadata_document_url'] ?? null)) {
+        if ($this->identifiedByMetadataDocument()) {
             return false;
         }
 
@@ -213,11 +213,19 @@ class Client extends Model
      */
     public function mayReuseGrant(?string $redirectUri): bool
     {
-        if (empty($this->attributes['metadata_document_url'] ?? null)) {
+        if (! $this->identifiedByMetadataDocument()) {
             return true;
         }
 
         return $redirectUri === null || ! Loopback::isRedirect($redirectUri);
+    }
+
+    /**
+     * Determine if the client is identified by the address of its metadata document.
+     */
+    public function identifiedByMetadataDocument(): bool
+    {
+        return ! empty($this->getAttributes()['metadata_document_url'] ?? null);
     }
 
     /**

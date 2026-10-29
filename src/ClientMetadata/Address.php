@@ -4,13 +4,13 @@ namespace Laravel\Passport\ClientMetadata;
 
 use GuzzleHttp\Psr7\Exception\MalformedUriException;
 use GuzzleHttp\Psr7\Uri;
+use League\Uri\Exceptions\SyntaxError;
+use League\Uri\UriString;
 
 /**
  * The address of a Client ID Metadata Document.
  *
- * An address is parsed once, strictly, and with the parser the HTTP client uses.
- *
- * @internal
+ * An address is parsed once, strictly, and read the same way by the parser the HTTP client uses.
  */
 class Address
 {
@@ -48,89 +48,74 @@ class Address
         }
 
         try {
-            $uri = new Uri($url);
-        } catch (MalformedUriException) {
+            $parts = UriString::parse($url);
+            $guzzle = new Uri($url);
+        } catch (SyntaxError|MalformedUriException) {
             throw new UnusableDocumentException('the address is malformed');
         }
 
-        if ($uri->getHost() === '') {
+        $host = (string) $parts['host'];
+
+        if ($host === '') {
             throw new UnusableDocumentException('the address has no host');
         }
 
-        // The parser drops the default port, so the authority is read from the address itself.
-        $authority = explode('/', preg_split('/[?#]/', substr($url, 8), 2)[0], 2)[0];
-
-        if (str_contains($authority, '@') || $uri->getUserInfo() !== '') {
+        if ($parts['user'] !== null) {
             throw new UnusableDocumentException('the address has user information');
         }
 
-        $hostPart = str_starts_with($authority, '[') ? substr($authority, (int) strpos($authority, ']')) : $authority;
-
-        if (! $allowPort && str_contains($hostPart, ':')) {
+        // An empty port ("host:") is read as no port, so it is found in the address itself.
+        if (! $allowPort && ($parts['port'] !== null || str_starts_with(substr($url, 8), $host.':'))) {
             throw new UnusableDocumentException('the address has a port');
         }
 
-        $host = str_starts_with($authority, '[')
-            ? substr($authority, 0, (int) strpos($authority, ']') + 1)
-            : explode(':', $authority)[0];
-
-        if (! static::isValidHost($host, $uri->getHost())) {
+        if (! static::isValidHost($host)) {
             throw new UnusableDocumentException('the address has an invalid host');
         }
 
-        if (str_contains($url, '#')) {
+        // The fetch is the HTTP client's, so it has to read the same host and port.
+        if ($guzzle->getHost() !== strtolower($host) || ($guzzle->getPort() ?? 443) !== ($parts['port'] ?? 443)) {
+            throw new UnusableDocumentException('the address has an invalid host');
+        }
+
+        if ($parts['fragment'] !== null) {
             throw new UnusableDocumentException('the address has a fragment');
         }
 
-        if (str_contains($url, '?')) {
+        if ($parts['query'] !== null) {
             throw new UnusableDocumentException('the address has a query');
         }
 
-        if (in_array($uri->getPath(), ['', '/'], true)) {
+        if (in_array($parts['path'], ['', '/'], true)) {
             throw new UnusableDocumentException('the address has no path');
         }
 
-        foreach (explode('/', $uri->getPath()) as $segment) {
+        foreach (explode('/', $parts['path']) as $segment) {
             if (in_array(rawurldecode($segment), ['.', '..'], true)) {
                 throw new UnusableDocumentException('the address has a dot segment');
             }
         }
 
-        return new self($url, $uri->getHost(), $uri->getPort() ?? 443);
+        return new self($url, $guzzle->getHost(), $parts['port'] ?? 443);
     }
 
     /**
-     * Determine if the given host, as written in the address, is a DNS name or an IP address that the parser read as is.
+     * Determine if the given host is a DNS name or an IP address.
      *
      * Only these hosts are fetched, so that the host that is vetted is the host the connection is made to,
      * whichever way a URI parser or the transport reads an unusual one.
      */
-    protected static function isValidHost(string $host, string $parsed): bool
+    protected static function isValidHost(string $host): bool
     {
-        if (strtolower($host) !== $parsed) {
-            return false;
-        }
-
         if (str_starts_with($host, '[')) {
-            return str_ends_with($host, ']') &&
-                filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
-        }
-
-        $labels = explode('.', $host);
-
-        foreach ($labels as $label) {
-            if (preg_match('/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/D', $label) !== 1) {
-                return false;
-            }
+            return filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
         }
 
         // A host made only of numbers is read as an address by the transport, so it has to be one.
-        $numbers = array_filter($labels, fn (string $label): bool => preg_match('/^(\d+|0x[0-9a-f]*)$/i', $label) === 1);
-
-        if (count($numbers) === count($labels)) {
+        if (preg_match('/^(\d+|0x[0-9a-f]*)(\.(\d+|0x[0-9a-f]*))*$/Di', $host) === 1) {
             return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
         }
 
-        return true;
+        return ! str_ends_with($host, '.') && filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false;
     }
 }

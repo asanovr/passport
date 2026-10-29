@@ -37,7 +37,7 @@ abstract class PassportTestCase extends TestCase
         });
 
         $this->beforeApplicationDestroyed(function () {
-            Passport::clientMetadataDocuments(false);
+            Passport::$clientMetadataDocuments = null;
             Passport::resolveClientMetadataHostsUsing(null);
             Passport::validateClientMetadataDocumentsUsing(null);
 

@@ -4,6 +4,7 @@ namespace Laravel\Passport\Tests\Feature;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -12,13 +13,11 @@ use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Laravel\Passport\Bridge\ClientRepository as BridgeClientRepository;
 use Laravel\Passport\Client;
-use Laravel\Passport\ClientMetadata\DocumentCache;
 use Laravel\Passport\Database\Factories\ClientFactory;
 use Laravel\Passport\Http\Middleware\CheckToken;
 use Laravel\Passport\Passport;
 use Orchestra\Testbench\Concerns\WithLaravelMigrations;
 use PHPUnit\Framework\Attributes\DataProvider;
-use RuntimeException;
 
 class ClientMetadataDocumentTest extends PassportTestCase
 {
@@ -50,26 +49,6 @@ class ClientMetadataDocumentTest extends PassportTestCase
             $table->dropIndex(['metadata_document_url']);
             $table->dropColumn('metadata_document_url');
         });
-    }
-
-    /**
-     * Run the given callback and get the queries it made that ask a database which columns a table has.
-     *
-     * @return string[]
-     */
-    protected function schemaQueriesOf(callable $callback): array
-    {
-        $queries = [];
-
-        DB::listen(function ($query) use (&$queries) {
-            $queries[] = $query->sql;
-        });
-
-        $callback();
-
-        return array_values(array_filter(
-            $queries, fn (string $sql): bool => preg_match('/table_x?info|information_schema\.columns/i', $sql) === 1
-        ));
     }
 
     public function testDocumentsAreNotAcceptedByDefault()
@@ -127,24 +106,6 @@ class ClientMetadataDocumentTest extends PassportTestCase
 
         Passport::clientMetadataDocuments(false);
         $this->assertFalse(Passport::clientMetadataDocumentsEnabled());
-    }
-
-    public function testSwitchingTheModeOnWithoutTheColumnRaisesAClearError()
-    {
-        Schema::table('oauth_clients', function ($table) {
-            $table->dropIndex(['metadata_document_url']);
-            $table->dropColumn('metadata_document_url');
-        });
-
-        Passport::clientMetadataDocuments();
-        $this->publish();
-        $this->signIn();
-        $this->withoutExceptionHandling();
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('[metadata_document_url]');
-
-        $this->get('/oauth/authorize?'.$this->authorizationQuery());
     }
 
     public function testAnAddressBecomesAClientThatCompletesTheAuthorizationCodeFlow()
@@ -614,51 +575,51 @@ class ClientMetadataDocumentTest extends PassportTestCase
         Log::shouldNotHaveReceived('warning');
     }
 
-    public function testNoColumnCheckRunsWhileTheModeIsOn()
+    public function testTheBareIdOfADocumentIdentifiedClientIsRefusedWhileTheModeIsOff()
     {
         Passport::clientMetadataDocuments();
         $this->publish();
         $this->signIn();
 
-        $queries = $this->schemaQueriesOf(function () {
-            $tokens = $this->connect();
+        $tokens = $this->connect();
+        $id = Client::query()->sole()->getKey();
 
-            $this->post('/oauth/token', [
-                'grant_type' => 'refresh_token',
-                'client_id' => $this->documentUrl,
-                'refresh_token' => $tokens['refresh_token'],
-            ])->assertOk();
-        });
+        Passport::clientMetadataDocuments(false);
 
-        $this->assertSame([], $queries);
+        $this->get('/oauth/authorize?'.$this->authorizationQuery($id))->assertStatus(401);
+        $this->post('/oauth/token', [
+            'grant_type' => 'refresh_token',
+            'client_id' => $id,
+            'refresh_token' => $tokens['refresh_token'],
+        ])->assertStatus(401)->assertJsonPath('error', 'invalid_client');
     }
 
-    #[DataProvider('schemas')]
-    public function testTheColumnIsCheckedAtMostOnceWhileTheModeIsOff(bool $hasColumn)
+    public function testNothingAsksForTheColumnWhenTheModeWasNeverConfigured()
     {
-        $hasColumn || $this->dropTheColumn();
+        $this->dropTheColumn();
+        $this->publish();
+        $this->signIn();
 
-        $queries = $this->schemaQueriesOf(function () {
-            foreach (range(1, 3) as $attempt) {
-                $this->post('/oauth/token', [
-                    'grant_type' => 'authorization_code',
-                    'client_id' => $this->documentUrl.$attempt,
-                    'redirect_uri' => 'https://client.example/callback',
-                    'code' => 'foo',
-                    'code_verifier' => str_repeat('a', 64),
-                ])->assertStatus(401);
-            }
+        $this->assertNull(Passport::$clientMetadataDocuments);
+
+        $queries = [];
+        DB::listen(function ($query) use (&$queries) {
+            $queries[] = $query->sql;
         });
 
-        $this->assertLessThanOrEqual(1, count($queries));
-    }
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertStatus(401);
+        $this->post('/oauth/token', [
+            'grant_type' => 'authorization_code',
+            'client_id' => $this->documentUrl,
+            'redirect_uri' => 'https://client.example/callback',
+            'code' => 'foo',
+            'code_verifier' => str_repeat('a', 64),
+        ])->assertStatus(401);
+        $this->post('/oauth/device/code', ['client_id' => $this->documentUrl, 'scope' => 'create'])->assertStatus(401);
 
-    /**
-     * @return array<string, array{0: bool}>
-     */
-    public static function schemas(): array
-    {
-        return ['with the column' => [true], 'without the column' => [false]];
+        $this->assertSame([], array_values(array_filter(
+            $queries, fn (string $sql): bool => str_contains($sql, 'metadata_document_url')
+        )));
     }
 
     public function testAnHttpsShapedIdOfAnotherKindOfClientIsLookedUpAsItAlwaysWasWithoutTheColumn()
@@ -761,8 +722,12 @@ class ClientMetadataDocumentTest extends PassportTestCase
             ->assertJsonPath('error', 'invalid_client');
 
         // The refusal is not a failed fetch: the document stays cached and the address is not delayed.
-        $this->assertNotNull(app(DocumentCache::class)->get($this->documentUrl));
-        $this->assertFalse(app(DocumentCache::class)->isDelayed($this->documentUrl));
+        $key = 'passport:client-metadata:'.hash('sha256', $this->documentUrl);
+        $this->assertFalse(Cache::has($key.':delayed'));
+        $this->assertNotEmpty(array_filter(
+            array_keys((fn () => $this->storage)->call(Cache::getStore())),
+            fn (string $name): bool => str_starts_with($name, $key.':document:')
+        ));
 
         $other->refresh();
         $this->assertSame('Victim', $other->name);

@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientMetadata\LimitedStream;
-use Laravel\Passport\ClientMetadata\Network;
+use Laravel\Passport\ClientMetadata\Fetcher;
 use Laravel\Passport\Passport;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Workbench\Database\Factories\UserFactory;
@@ -94,6 +94,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
             'brackets around a name' => ['https://[client.example]/oauth/client.json'],
             'a malformed IPv6 address' => ['https://[2001:db8::zz]/oauth/client.json'],
             'an IPv6 address with a zone' => ['https://[fe80::1%25eth0]/oauth/client.json'],
+            'an IPvFuture host' => ['https://[v1.fe80::a+en1]/oauth/client.json'],
             'an IPv4 address in brackets' => ['https://[93.184.216.34]/oauth/client.json'],
         ];
     }
@@ -125,6 +126,17 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
 
         $this->assertRefused($this->authorize($address));
         $this->assertSame(0, $this->requestsSent());
+    }
+
+    public function testAHostInCapitalsIsFetchedAndPinnedByItsLowerCaseName()
+    {
+        $url = 'https://Client.Example/oauth/client.json';
+        $this->publish($this->document(url: $url), url: 'https://client.example/oauth/client.json');
+
+        $this->authorize($url)->assertOk();
+
+        $this->assertSame($url, Client::query()->sole()->metadata_document_url);
+        $this->assertSame(['client.example:443:93.184.216.34'], $this->requestOptions[0]['curl'][CURLOPT_RESOLVE]);
     }
 
     public function testAnAddressWithAPortIsAcceptedWhilePrivateNetworksAreAllowed()
@@ -443,7 +455,7 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
         $this->publish();
 
         foreach ([['curl_exec'], ['curl_multi_exec'], ['curl_exec', 'curl_multi_exec']] as $missing) {
-            $this->app->bind(Network::class, fn () => new NetworkWithoutFunctions($missing));
+            $this->app->bind(Fetcher::class, fn () => new FetcherWithoutFunctions($missing));
 
             $this->travel(1)->hour();
 
@@ -503,10 +515,10 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
     }
 }
 
-class NetworkWithoutFunctions extends Network
+class FetcherWithoutFunctions extends Fetcher
 {
     /**
-     * Create a new network instance that lacks the given functions.
+     * Create a new fetcher instance that lacks the given functions.
      *
      * @param  string[]  $missing
      */

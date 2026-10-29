@@ -2,9 +2,8 @@
 
 namespace Laravel\Passport\ClientMetadata;
 
-use GuzzleHttp\Psr7\Exception\MalformedUriException;
-use GuzzleHttp\Psr7\Uri;
 use JsonSerializable;
+use League\Uri\Uri;
 
 /**
  * What the authorization view knows about a client that is identified by a metadata document.
@@ -37,8 +36,6 @@ class Consent implements JsonSerializable
 
     /**
      * Create the value for the given document and the redirect address of the request.
-     *
-     * @internal
      */
     public static function for(Document $document, ?string $redirectUri): static
     {
@@ -49,25 +46,11 @@ class Consent implements JsonSerializable
             $host,
             $document->name,
             $document->clientUri,
-            $document->clientUri !== null && static::origin($document->clientUri) === static::origin($document->url),
+            $document->clientUri !== null && Uri::new($document->url)->isSameOrigin($document->clientUri),
             $document->logoUri,
             $redirectUri !== null && Loopback::isRedirect($redirectUri),
             array_filter($document->redirectUris, fn (string $uri): bool => ! Loopback::isRedirect($uri)) === [],
         );
-    }
-
-    /**
-     * Get the origin (scheme, host and port) of the given address.
-     */
-    protected static function origin(string $url): ?string
-    {
-        try {
-            $uri = new Uri($url);
-        } catch (MalformedUriException) {
-            return null;
-        }
-
-        return $uri->getScheme().'://'.$uri->getHost().':'.($uri->getPort() ?? 443);
     }
 
     /**

@@ -6,7 +6,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Laravel\Passport\Client;
-use Laravel\Passport\ClientMetadata\Network;
+use Laravel\Passport\ClientMetadata\Fetcher;
 use Laravel\Passport\Passport;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -220,7 +220,7 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
         $this->publish();
         $this->resolveTo(['93.184.216.34']);
 
-        $this->app->bind(Network::class, UnpinnableNetwork::class);
+        $this->app->bind(Fetcher::class, UnpinnableFetcher::class);
 
         $this->assertRefused($this->authorize());
         $this->assertSame(0, $this->requestsSent());
@@ -313,9 +313,9 @@ class ClientMetadataDocumentNetworkTest extends PassportTestCase
     }
 }
 
-class UnpinnableNetwork extends Network
+class UnpinnableFetcher extends Fetcher
 {
-    public function canPin(): bool
+    protected function canPin(): bool
     {
         return false;
     }

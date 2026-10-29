@@ -2,16 +2,13 @@
 
 namespace Laravel\Passport\Bridge;
 
-use GuzzleHttp\Psr7\Exception\MalformedUriException;
-use GuzzleHttp\Psr7\Uri;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\Entities\ClientEntityInterface;
 use League\OAuth2\Server\Grant\AuthCodeGrant as LeagueAuthCodeGrant;
+use League\Uri\Exceptions\SyntaxError;
+use League\Uri\Uri;
 use Psr\Http\Message\ServerRequestInterface;
 
-/**
- * @internal
- */
 class AuthCodeGrant extends LeagueAuthCodeGrant
 {
     /**
@@ -22,45 +19,41 @@ class AuthCodeGrant extends LeagueAuthCodeGrant
         ClientEntityInterface $client,
         ServerRequestInterface $request
     ): void {
-        if (! $this->isLocalhostPortMatch($redirectUri, $client)) {
+        if (! $this->isLocalhostMatch($redirectUri, $client)) {
             parent::validateRedirectUri($redirectUri, $client, $request);
         }
     }
 
     /**
-     * Determine if the redirect address only differs from a listed "localhost" address in its port.
+     * Determine if the redirect address is a listed "http://localhost" address on any port.
      *
-     * A client that is identified by a metadata document lists "http://localhost/callback" once and
-     * comes back on whichever port is free. A listed address that names a port must match exactly.
+     * League matches "http://127.0.0.1" and "http://[::1]" this way for every client, and a client that is
+     * identified by a metadata document comes back on whichever port is free.
      */
-    protected function isLocalhostPortMatch(string $redirectUri, ClientEntityInterface $client): bool
+    protected function isLocalhostMatch(string $redirectUri, ClientEntityInterface $client): bool
     {
         if (! $client instanceof Client || ! $client->identifiedByMetadataDocument ||
-            ! Passport::$clientMetadataConfiguration?->allowLoopbackRedirects) {
+            ! Passport::clientMetadataDocumentsEnabled() || ! Passport::$clientMetadataDocuments['allowLoopbackRedirects']) {
             return false;
         }
 
         try {
-            $requested = new Uri($redirectUri);
-        } catch (MalformedUriException) {
+            $requested = Uri::new($redirectUri);
+        } catch (SyntaxError) {
             return false;
         }
 
-        if ($requested->getScheme() !== 'http' || $requested->getHost() !== 'localhost' || $requested->getUserInfo() !== '') {
+        if ($requested->getScheme() !== 'http' || $requested->getHost() !== 'localhost') {
             return false;
         }
 
         foreach ((array) $client->getRedirectUri() as $listed) {
             try {
-                $listed = new Uri($listed);
-            } catch (MalformedUriException) {
+                if ((string) Uri::new($listed)->withPort(null) === (string) $requested->withPort(null)) {
+                    return true;
+                }
+            } catch (SyntaxError) {
                 continue;
-            }
-
-            if ($listed->getScheme() === 'http' && $listed->getHost() === 'localhost' && $listed->getPort() === null &&
-                $listed->getUserInfo() === '' && $listed->getPath() === $requested->getPath() &&
-                $listed->getQuery() === $requested->getQuery() && $requested->getFragment() === '') {
-                return true;
             }
         }
 

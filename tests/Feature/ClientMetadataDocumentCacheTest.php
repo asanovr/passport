@@ -100,6 +100,8 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
             'a max-age that is not a number' => [['Cache-Control' => 'max-age=soon'], 60],
             'a negative max-age' => [['Cache-Control' => 'max-age=-5'], 60],
             'an empty max-age' => [['Cache-Control' => 'public, max-age='], 60],
+            's-maxage beats max-age' => [['Cache-Control' => 'max-age=300, s-maxage=200'], 200],
+            's-maxage less the Age' => [['Cache-Control' => 's-maxage=300', 'Age' => '100'], 200],
             'an invalid max-age beats Expires' => [['Cache-Control' => 'max-age=soon', 'Expires' => $expires(900)], 60],
         ];
     }
@@ -124,6 +126,24 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         $this->assertSame(1, $this->requestsSent());
 
         $this->at($lifetime + 1);
+        $this->authorize()->assertOk();
+        $this->assertSame(2, $this->requestsSent());
+    }
+
+    public function testExpiresWithoutADateIsMeasuredFromTheClockOfTheApplication()
+    {
+        $this->at(-7200);
+        $this->publish(headers: [
+            'Content-Type' => 'application/json',
+            'Expires' => gmdate('D, d M Y H:i:s \G\M\T', $this->start->getTimestamp() - 7200 + 500),
+        ]);
+
+        $this->authorize()->assertOk();
+        $this->at(-7200 + 499);
+        $this->authorize()->assertOk();
+        $this->assertSame(1, $this->requestsSent());
+
+        $this->at(-7200 + 501);
         $this->authorize()->assertOk();
         $this->assertSame(2, $this->requestsSent());
     }
@@ -190,11 +210,11 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         $this->authorize()->assertStatus(401);
 
         $this->publish();
-        $this->at(29);
+        $this->at(59);
         $this->authorize()->assertStatus(401);
         $this->assertSame(1, $this->requestsSent());
 
-        $this->at(31);
+        $this->at(61);
         $this->authorize()->assertOk();
         $this->assertSame(2, $this->requestsSent());
     }
@@ -205,49 +225,26 @@ class ClientMetadataDocumentCacheTest extends PassportTestCase
         $this->authorize()->assertStatus(401);
 
         $this->publish();
-        $this->at(31);
+        $this->at(61);
         $this->authorize()->assertOk();
         $this->assertSame(2, $this->requestsSent());
         $this->assertSame(1, Client::query()->count());
     }
 
-    public function testTheDelayDoublesWithEachFailureUpToTenMinutesAndASuccessResetsIt()
+    public function testTheDelayAfterAFailedFetchIsOneFixedMinute()
     {
         $this->publish('Oops', 500);
-        $now = 0;
         $sent = 0;
 
-        foreach ([30, 60, 120, 240, 480, 600, 600] as $delay) {
-            $this->at($now);
+        foreach ([0, 61, 122] as $at) {
+            $this->at($at);
             $this->authorize()->assertStatus(401);
             $this->assertSame(++$sent, $this->requestsSent());
 
-            $this->at($now + $delay - 1);
+            $this->at($at + 59);
             $this->authorize()->assertStatus(401);
             $this->assertSame($sent, $this->requestsSent());
-
-            $now += $delay + 1;
         }
-
-        $this->publish(headers: ['Content-Type' => 'application/json', 'Cache-Control' => 'max-age=1']);
-        $this->at($now);
-        $this->authorize()->assertOk();
-        $this->assertSame(++$sent, $this->requestsSent());
-
-        // A success resets the delay: the next failure is delayed by 30 seconds again.
-        $this->publish('Oops', 500);
-        $now += 61;
-        $this->at($now);
-        $this->authorize()->assertStatus(401);
-        $this->assertSame(++$sent, $this->requestsSent());
-
-        $this->at($now + 29);
-        $this->authorize()->assertStatus(401);
-        $this->assertSame($sent, $this->requestsSent());
-
-        $this->at($now + 31);
-        $this->authorize()->assertStatus(401);
-        $this->assertSame(++$sent, $this->requestsSent());
     }
 
     public function testAFailedRefetchIsRefusedEvenWhenTheClientExistsAndExistingTokensStillRefresh()

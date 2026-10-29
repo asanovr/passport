@@ -28,17 +28,18 @@ class ClientRepository implements ClientRepositoryInterface
     {
         $isAddress = Resolver::isAddress($clientIdentifier);
 
-        $record = $isAddress ? $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier) : null;
-
-        // An identifier that merely looks like an address, in an application that does not
-        // accept metadata documents, is looked up exactly as it always has been.
-        if ($record === null && (! $isAddress || ! Passport::clientMetadataDocumentsEnabled())) {
+        if ($isAddress && Passport::clientMetadataDocumentsEnabled()) {
+            $record = $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier);
+        } else {
             $record = $this->clients->findActive($clientIdentifier);
 
-            // The bare identifier of a client that is identified by a metadata document
-            // is never accepted: the client is only reachable through its document.
-            if (($record?->getAttributes()['metadata_document_url'] ?? null) !== null) {
+            if ($record?->identifiedByMetadataDocument()) {
                 return null;
+            }
+
+            // The connections that were made while documents were accepted keep working once they are switched off.
+            if ($record === null && $isAddress && Passport::$clientMetadataDocuments !== null) {
+                $record = $this->clients->findActiveByMetadataDocumentUrl($clientIdentifier);
             }
         }
 
@@ -77,7 +78,7 @@ class ClientRepository implements ClientRepositoryInterface
             $model->confidential(),
             $model->provider,
             $model->grant_types,
-            ! empty($model->getAttributes()['metadata_document_url'] ?? null)
+            $model->identifiedByMetadataDocument()
         );
     }
 }

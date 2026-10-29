@@ -9,7 +9,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
-use Laravel\Passport\ClientMetadata\Configuration as ClientMetadataConfiguration;
+use InvalidArgumentException;
 use Laravel\Passport\Contracts\AuthorizationViewResponse;
 use Laravel\Passport\Contracts\DeviceAuthorizationViewResponse;
 use Laravel\Passport\Contracts\DeviceUserCodeViewResponse;
@@ -182,18 +182,29 @@ class Passport
     public static $registersJsonApiRoutes = false;
 
     /**
-     * The configuration of Client ID Metadata Documents, or null when they are not accepted.
+     * The options of Client ID Metadata Documents, or null when the application has never called clientMetadataDocuments().
      *
-     * @internal
+     * @var array{
+     *     enabled: bool,
+     *     requireAuthentication: bool,
+     *     allowedHosts: string[],
+     *     allowLoopbackRedirects: bool,
+     *     allowPrivateNetworks: bool,
+     *     proxy: string|null,
+     *     connectTimeout: int,
+     *     timeout: int,
+     *     maximumSize: int,
+     *     defaultLifetime: int,
+     *     minimumLifetime: int,
+     *     maximumLifetime: int
+     * }|null
      */
-    public static ?ClientMetadataConfiguration $clientMetadataConfiguration = null;
+    public static ?array $clientMetadataDocuments = null;
 
     /**
      * The callback that lets the application refuse a validated client metadata document.
      *
      * @var (\Closure(array<string, mixed>, string): (string|null))|null
-     *
-     * @internal
      */
     public static ?Closure $clientMetadataDocumentValidator = null;
 
@@ -201,8 +212,6 @@ class Passport
      * The callback that resolves the addresses of the hosts that publish client metadata documents.
      *
      * @var (\Closure(string): string[])|null
-     *
-     * @internal
      */
     public static ?Closure $clientMetadataHostResolver = null;
 
@@ -756,19 +765,24 @@ class Passport
         int $minimumLifetime = 60,
         int $maximumLifetime = 86400,
     ): void {
-        static::$clientMetadataConfiguration = $enabled ? new ClientMetadataConfiguration(
-            requireAuthentication: $requireAuthentication,
-            allowedHosts: $allowedHosts,
-            allowLoopbackRedirects: $allowLoopbackRedirects,
-            allowPrivateNetworks: $allowPrivateNetworks,
-            proxy: $proxy,
-            connectTimeout: $connectTimeout,
-            timeout: $timeout,
-            maximumSize: $maximumSize,
-            defaultLifetime: $defaultLifetime,
-            minimumLifetime: $minimumLifetime,
-            maximumLifetime: $maximumLifetime,
-        ) : null;
+        foreach (compact(
+            'connectTimeout', 'timeout', 'maximumSize', 'defaultLifetime', 'minimumLifetime', 'maximumLifetime'
+        ) as $name => $value) {
+            if ($value < 1) {
+                throw new InvalidArgumentException("The client metadata document option [{$name}] must be at least 1.");
+            }
+        }
+
+        if ($minimumLifetime > $maximumLifetime) {
+            throw new InvalidArgumentException(
+                'The minimum lifetime of a client metadata document must not be greater than its maximum lifetime.'
+            );
+        }
+
+        static::$clientMetadataDocuments = compact(
+            'enabled', 'requireAuthentication', 'allowedHosts', 'allowLoopbackRedirects', 'allowPrivateNetworks',
+            'proxy', 'connectTimeout', 'timeout', 'maximumSize', 'defaultLifetime', 'minimumLifetime', 'maximumLifetime'
+        );
     }
 
     /**
@@ -776,7 +790,7 @@ class Passport
      */
     public static function clientMetadataDocumentsEnabled(): bool
     {
-        return static::$clientMetadataConfiguration !== null;
+        return static::$clientMetadataDocuments['enabled'] ?? false;
     }
 
     /**

@@ -8,8 +8,6 @@ use Psr\Http\Message\StreamInterface;
 
 /**
  * A stream that stops accepting bytes at its limit, which aborts the transfer feeding it.
- *
- * @internal
  */
 class LimitedStream implements StreamInterface
 {

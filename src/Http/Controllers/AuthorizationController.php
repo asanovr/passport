@@ -8,12 +8,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Str;
+use Laravel\Passport\Bridge\Client as BridgeClient;
 use Laravel\Passport\Bridge\User;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientMetadata\Consent;
-use Laravel\Passport\ClientMetadata\ResolvedClient;
 use Laravel\Passport\ClientMetadata\Resolver;
-use Laravel\Passport\ClientMetadata\SignInRequiredException;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Contracts\AuthorizationViewResponse;
 use Laravel\Passport\Exceptions\AuthenticationException;
@@ -21,6 +20,7 @@ use Laravel\Passport\Exceptions\OAuthServerException;
 use Laravel\Passport\Passport;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Entities\ScopeEntityInterface;
+use League\OAuth2\Server\Exception\OAuthServerException as LeagueException;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -62,10 +62,10 @@ class AuthorizationController
 
         try {
             $resolved = $this->withErrorHandling(
-                fn (): ?ResolvedClient => $this->resolveClientMetadata($psrRequest),
+                fn (): ?array => $this->resolveClientMetadata($psrRequest),
                 $useFragment
             );
-        } catch (SignInRequiredException) {
+        } catch (AuthenticationException) {
             // The redirect address in the request has not been checked yet, so nothing is ever redirected to it.
             $prompt->contains('none')
                 ? throw OAuthServerException::loginRequired()
@@ -76,6 +76,12 @@ class AuthorizationController
             fn (): AuthorizationRequestInterface => $this->server->validateAuthorizationRequest($psrRequest),
             $useFragment
         );
+
+        // A client that is identified by its document is not authorized again while documents are not accepted.
+        if (! Passport::clientMetadataDocumentsEnabled() && $authRequest->getClient() instanceof BridgeClient &&
+            $authRequest->getClient()->identifiedByMetadataDocument) {
+            throw new OAuthServerException(LeagueException::invalidClient($psrRequest), $useFragment);
+        }
 
         if ($this->guard->guest()) {
             $prompt->contains('none')
@@ -98,7 +104,7 @@ class AuthorizationController
         $authRequest->setUser(new User($user->getAuthIdentifier()));
 
         $scopes = $this->parseScopes($authRequest);
-        $client = $resolved?->client ?? $this->clients->find($authRequest->getClient()->getIdentifier());
+        $client = $resolved[0] ?? $this->clients->find($authRequest->getClient()->getIdentifier());
 
         $redirectUri = $authRequest->getRedirectUri() ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] ?? null;
 
@@ -121,29 +127,27 @@ class AuthorizationController
             'scopes' => $scopes,
             'request' => $request,
             'authToken' => $authToken,
-            'clientMetadata' => $resolved ? Consent::for($resolved->document, $redirectUri) : null,
+            'clientMetadata' => $resolved ? Consent::for($resolved[1], $redirectUri) : null,
         ]);
     }
 
     /**
-     * Resolve the client behind the request's client id when the id is the address of a metadata document.
+     * Resolve the client and its document when the request's client id is the address of a metadata document.
+     *
+     * @return array{0: \Laravel\Passport\Client, 1: \Laravel\Passport\ClientMetadata\Document}|null
      *
      * @throws \League\OAuth2\Server\Exception\OAuthServerException
+     * @throws \Laravel\Passport\Exceptions\AuthenticationException
      */
-    protected function resolveClientMetadata(ServerRequestInterface $psrRequest): ?ResolvedClient
+    protected function resolveClientMetadata(ServerRequestInterface $psrRequest): ?array
     {
         $clientId = $psrRequest->getQueryParams()['client_id'] ?? null;
 
         // Only the authorization code flow identifies a client by a document: the other
         // response types are never answered with a fetch, nor with a record.
-        if (($psrRequest->getQueryParams()['response_type'] ?? null) !== 'code' ||
+        if (! Passport::clientMetadataDocumentsEnabled() ||
+            ($psrRequest->getQueryParams()['response_type'] ?? null) !== 'code' ||
             ! is_string($clientId) || ! Resolver::isAddress($clientId)) {
-            return null;
-        }
-
-        // An application that does not accept metadata documents leaves an id that merely looks like an
-        // address to the authorization server, unless the address belongs to a client that has a document.
-        if (! Passport::clientMetadataDocumentsEnabled() && $this->clients->findByMetadataDocumentUrl($clientId) === null) {
             return null;
         }
 

@@ -87,6 +87,11 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'a client_uri that is plain http' => [['client_uri' => 'http://client.example/']],
             'a client_uri that is relative' => [['client_uri' => '/about']],
             'a logo_uri that is plain http' => [['logo_uri' => 'http://client.example/logo.png']],
+            'an empty client_uri' => [['client_uri' => '']],
+            'an empty logo_uri' => [['logo_uri' => '']],
+            'an empty token_endpoint_auth_method' => [['token_endpoint_auth_method' => '']],
+            'empty grant_types' => [['grant_types' => '']],
+            'empty response_types' => [['response_types' => '']],
             'a logo_uri that is a data address' => [['logo_uri' => 'data:image/png;base64,AAAA']],
         ];
     }
@@ -134,7 +139,7 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
         $this->authorize()->assertStatus(401);
 
         Log::shouldHaveReceived('warning')->withArgs(
-            fn (string $message, array $context): bool => str_contains($message, 'client authentication') && $context === ['host' => 'client.example']
+            fn (string $message, array $context): bool => str_contains($message, 'token endpoint auth method') && $context === ['host' => 'client.example']
         )->once();
     }
 
