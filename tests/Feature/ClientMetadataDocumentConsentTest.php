@@ -140,8 +140,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
 
         $response = $this->authorize(['redirect_uri' => $client->redirect_uris[0]], $client->getKey())->assertOk();
 
-        $this->assertArrayHasKey('clientMetadata', $response->json());
-        $this->assertNull($response->json('clientMetadata'));
+        $this->assertArrayNotHasKey('clientMetadata', $response->json());
     }
 
     /**

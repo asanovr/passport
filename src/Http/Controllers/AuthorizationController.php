@@ -127,7 +127,7 @@ class AuthorizationController
             'scopes' => $scopes,
             'request' => $request,
             'authToken' => $authToken,
-            'clientMetadata' => $resolved ? Consent::for($resolved[1], $redirectUri) : null,
+            ...($resolved ? ['clientMetadata' => Consent::for($resolved[1], $redirectUri)] : []),
         ]);
     }
 
