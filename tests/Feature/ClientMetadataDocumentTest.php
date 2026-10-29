@@ -2,6 +2,7 @@
 
 namespace Laravel\Passport\Tests\Feature;
 
+use Illuminate\Contracts\Hashing\Hasher;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -13,9 +14,11 @@ use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Laravel\Passport\Bridge\ClientRepository as BridgeClientRepository;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Database\Factories\ClientFactory;
 use Laravel\Passport\Http\Middleware\CheckToken;
 use Laravel\Passport\Passport;
+use Mockery;
 use Orchestra\Testbench\Concerns\WithLaravelMigrations;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -654,6 +657,30 @@ class ClientMetadataDocumentTest extends PassportTestCase
             ->assertJsonPath('error', 'invalid_client');
 
         Log::shouldNotHaveReceived('warning');
+    }
+
+    public function testADocumentAddressIsNotLookedUpByKeyWhileTheModeIsOffAndClientsHaveIntegerKeys()
+    {
+        Passport::clientMetadataDocuments();
+        $this->publish();
+        $this->signIn();
+        $this->get('/oauth/authorize?'.$this->authorizationQuery())->assertOk();
+
+        Passport::clientMetadataDocuments(false);
+        $clientUuids = Passport::$clientUuids;
+        Passport::$clientUuids = false;
+
+        try {
+            $clients = Mockery::mock(ClientRepository::class)->makePartial();
+            $clients->shouldReceive('findActive')->never();
+
+            $entity = (new BridgeClientRepository($clients, $this->app->make(Hasher::class)))
+                ->getClientEntity($this->documentUrl);
+
+            $this->assertTrue($entity?->identifiedByMetadataDocument);
+        } finally {
+            Passport::$clientUuids = $clientUuids;
+        }
     }
 
     public function testTheDeviceAuthorizationEndpointNeverFetchesForADocumentAddress()

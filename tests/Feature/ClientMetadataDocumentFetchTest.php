@@ -311,17 +311,20 @@ class ClientMetadataDocumentFetchTest extends PassportTestCase
      */
     public static function invalidBodies(): array
     {
-        $document = fn (array $extra) => json_encode([
-            'client_id' => 'https://client.example/oauth/client.json',
-            'redirect_uris' => ['https://client.example/callback'],
-        ] + $extra);
-
         return [
             'not JSON' => ['<html>hello</html>'],
             'empty' => [''],
             'a number' => ['1'],
-            'nested nine levels' => [$document(['extra' => static::nest(8)])],
         ];
+    }
+
+    public function testADocumentNestedNineLevelsDeepIsRefused()
+    {
+        Log::spy();
+        $this->publish($this->document(['extra' => static::nest(8)]));
+
+        $this->assertRefused($this->authorize());
+        $this->assertRefusalLogged('The document is nested too deeply.');
     }
 
     public function testADocumentNestedEightLevelsDeepIsAccepted()

@@ -56,8 +56,12 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'a software_version that is not a string' => [['software_version' => 5]],
             'a malformed redirect address' => [['redirect_uris' => ['https://client.example/a b']]],
             'response_types that are a string' => [['response_types' => 'code']],
+            'grant_types that are an object' => [['grant_types' => ['a' => 'authorization_code']]],
+            'response_types that are an object' => [['response_types' => ['a' => 'code']]],
             'redirect_uris that are a string' => [['redirect_uris' => 'https://client.example/callback']],
             'redirect_uris that are not strings' => [['redirect_uris' => [5]]],
+            'redirect_uris that are an object' => [['redirect_uris' => ['a' => 'https://client.example/callback']]],
+            'a redirect address that is a list' => [['redirect_uris' => [['https://client.example/callback']]]],
 
             'no redirect_uris' => [['redirect_uris' => static::MISSING]],
             'empty redirect_uris' => [['redirect_uris' => []]],

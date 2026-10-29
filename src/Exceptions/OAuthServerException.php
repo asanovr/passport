@@ -28,8 +28,9 @@ class OAuthServerException extends HttpResponseException
      */
     public static function loginRequired(?AuthorizationRequestInterface $authRequest = null): static
     {
-        $redirectUri = $authRequest?->getRedirectUri()
-            ?? ($authRequest ? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] : null);
+        $redirectUri = $authRequest
+            ? $authRequest->getRedirectUri() ?? Arr::wrap($authRequest->getClient()->getRedirectUri())[0]
+            : null;
 
         $exception = new LeagueException(
             'The authorization server requires end-user authentication.',
@@ -55,9 +56,6 @@ class OAuthServerException extends HttpResponseException
      */
     public static function consentRequired(AuthorizationRequestInterface $authRequest): static
     {
-        $redirectUri = $authRequest?->getRedirectUri()
-            ?? ($authRequest ? Arr::wrap($authRequest->getClient()->getRedirectUri())[0] : null);
-
         $exception = new LeagueException(
             'The authorization server requires end-user consent.',
             9,

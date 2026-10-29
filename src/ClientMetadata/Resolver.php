@@ -58,7 +58,7 @@ class Resolver
 
         $allowed = Passport::$clientMetadataDocuments['allowedHosts'];
 
-        if (! empty($allowed) && ! Str::is(array_map(strtolower(...), $allowed), strtolower($address->host))) {
+        if (! empty($allowed) && ! Str::is(array_map(strtolower(...), $allowed), $address->host)) {
             $this->refuse($request, $url, 'The host is not in the list of allowed hosts.');
         }
 
@@ -74,7 +74,6 @@ class Resolver
             $this->ensureMayFetch($request, $url, $authenticated);
         }
 
-        // Only a client that exists, with a document that is fresh, is brought up to date without the lock.
         if (is_null($existing) || is_null($document)) {
             return $this->resolveWhileLocked($request, $address, $authenticated);
         }
@@ -94,8 +93,7 @@ class Resolver
         ServerRequestInterface $request,
         Address $address,
         bool $authenticated
-    ): array
-    {
+    ): array {
         $url = $address->url;
 
         $resolve = function () use ($request, $address, $url, $authenticated): array {
@@ -157,8 +155,7 @@ class Resolver
         string $url,
         Document $document,
         ?Client $existing
-    ): array
-    {
+    ): array {
         try {
             $client = $this->clients->syncFromMetadataDocument($document, $existing);
 

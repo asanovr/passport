@@ -252,6 +252,7 @@ class ClientMetadataDocumentConsentTest extends PassportTestCase
             'a different path' => [['http://localhost/callback'], 'http://localhost:54321/other', false],
             'an added query' => [['http://localhost/callback'], 'http://localhost:54321/callback?a=1', false],
             'a different host' => [['http://localhost/callback'], 'http://localhost.evil.test:54321/callback', false],
+            'a name below localhost on another port' => [['http://app.localhost/callback'], 'http://app.localhost:54321/callback', false],
             'a loopback address instead of the name' => [['http://localhost/callback'], 'http://127.0.0.1:54321/callback', false],
             'https instead of http' => [['http://localhost/callback'], 'https://localhost:54321/callback', false],
             'https on another port when https is listed' => [['https://localhost/callback'], 'https://localhost:8443/callback', false],

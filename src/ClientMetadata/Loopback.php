@@ -15,7 +15,7 @@ class Loopback
     public static function isRedirect(string $uri): bool
     {
         try {
-            $host = strtolower(rtrim(Uri::new($uri)->getHost() ?? '', '.'));
+            $host = rtrim(Uri::new($uri)->getHost() ?? '', '.');
         } catch (SyntaxError) {
             return false;
         }

@@ -259,7 +259,6 @@ class Fetcher
      */
     protected function isGlobal(string $address): bool
     {
-        // Only 2000::/3 is global unicast; the rest is reserved, local or multicast.
         return filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_GLOBAL_RANGE) !== false
             && (! str_contains($address, ':') || IpUtils::checkIp($address, '2000::/3'))
             && ! IpUtils::checkIp($address, static::NON_GLOBAL);

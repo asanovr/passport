@@ -77,7 +77,6 @@ class AuthorizationController
             $useFragment
         );
 
-        // A client that is identified by its document is not authorized again while documents are not accepted.
         if (! Passport::clientMetadataDocumentsEnabled() && $authRequest->getClient() instanceof BridgeClient &&
             $authRequest->getClient()->identifiedByMetadataDocument) {
             throw new OAuthServerException(LeagueException::invalidClient($psrRequest), $useFragment);
