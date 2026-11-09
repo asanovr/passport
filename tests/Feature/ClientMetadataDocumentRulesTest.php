@@ -78,6 +78,16 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'a custom scheme on a loopback host' => [['redirect_uris' => ['myapp://localhost/callback']]],
             'one bad redirect address among good ones' => [['redirect_uris' => ['https://client.example/callback', 'myapp://callback']]],
 
+            'supported methods without none' => [['token_endpoint_auth_methods_supported' => ['private_key_jwt']]],
+            'a method outside the supported methods' => [[
+                'token_endpoint_auth_methods_supported' => ['none'],
+                'token_endpoint_auth_method' => 'private_key_jwt',
+            ]],
+            'empty supported methods' => [['token_endpoint_auth_methods_supported' => []]],
+            'null supported methods' => [['token_endpoint_auth_methods_supported' => null]],
+            'supported methods that are a string' => [['token_endpoint_auth_methods_supported' => 'none']],
+            'supported methods that include a number' => [['token_endpoint_auth_methods_supported' => ['none', 5]]],
+            'supported methods that are an object' => [['token_endpoint_auth_methods_supported' => ['a' => 'none']]],
             'client authentication by key' => [['token_endpoint_auth_method' => 'private_key_jwt']],
             'a client_secret' => [['client_secret' => 'shh']],
             'an empty client_secret' => [['client_secret' => null]],
@@ -158,6 +168,14 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
                 ['redirect_uris' => [$long = 'https://client.example/'.str_repeat('a', 2025)]],
                 [$long],
             ],
+            'supported methods with none and the method none' => [
+                ['token_endpoint_auth_methods_supported' => ['none'], 'token_endpoint_auth_method' => 'none'],
+                ['https://client.example/callback'],
+            ],
+            'supported methods with none and a key method' => [
+                ['token_endpoint_auth_methods_supported' => ['private_key_jwt', 'none']],
+                ['https://client.example/callback'],
+            ],
             'the supported methods spelled out' => [
                 [
                     'token_endpoint_auth_method' => 'none',
@@ -183,6 +201,32 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
         $this->authorize(null, ['redirect_uri' => $redirectUris[0]])->assertStatus(200);
 
         $this->assertSame($redirectUris, Client::query()->sole()->redirect_uris);
+    }
+
+    public function testTheDocumentOfChatGptIsAccepted()
+    {
+        $url = 'https://chatgpt.com/oauth/client.json';
+        $this->publish([
+            'client_id' => $url,
+            'client_uri' => 'https://chatgpt.com/',
+            'redirect_uris' => ['https://chatgpt.com/connector_platform_oauth_redirect'],
+            'token_endpoint_auth_method' => 'private_key_jwt',
+            'token_endpoint_auth_methods_supported' => ['none', 'private_key_jwt'],
+            'grant_types' => ['authorization_code', 'refresh_token'],
+            'response_types' => ['code'],
+            'client_name' => 'ChatGPT',
+            'logo_uri' => 'https://persistent.oaistatic.com/sonic/misc/openai-logo.png',
+            'token_endpoint_auth_signing_alg' => 'RS256',
+            'jwks_uri' => 'https://chatgpt.com/oauth/jwks.json',
+        ], url: $url);
+
+        $this->authorize($url, ['redirect_uri' => 'https://chatgpt.com/connector_platform_oauth_redirect'])
+            ->assertOk()
+            ->assertJsonPath('client.name', 'ChatGPT');
+
+        $client = Client::query()->sole();
+        $this->assertNull($client->secret);
+        $this->assertFalse($client->confidential());
     }
 
     public function testANameOf255CharactersIsAccepted()

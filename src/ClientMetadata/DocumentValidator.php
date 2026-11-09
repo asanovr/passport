@@ -4,6 +4,7 @@ namespace Laravel\Passport\ClientMetadata;
 
 use Closure;
 use Illuminate\Contracts\Validation\Factory as ValidationFactory;
+use Illuminate\Validation\Rule;
 use Laravel\Passport\Passport;
 use League\Uri\Exceptions\SyntaxError;
 use League\Uri\UriString;
@@ -38,7 +39,9 @@ class DocumentValidator
             'application_type' => ['string'],
             'software_id' => ['string'],
             'software_version' => ['string'],
-            'token_endpoint_auth_method' => ['filled', 'string', 'in:none'],
+            'token_endpoint_auth_methods_supported' => ['list', 'min:1', 'contains:none'],
+            'token_endpoint_auth_methods_supported.*' => ['string'],
+            'token_endpoint_auth_method' => ['filled', 'string', Rule::in($this->authMethods($data))],
             'redirect_uris' => ['required', 'list', 'max:10'],
             'redirect_uris.*' => ['required', 'string', 'max:2048'],
             'grant_types' => ['filled', 'list', 'contains:authorization_code'],
@@ -105,6 +108,22 @@ class DocumentValidator
         $this->applyValidationHook($data, $address->url);
 
         return $document;
+    }
+
+    /**
+     * Get the token endpoint authentication methods the document's own method may name.
+     *
+     * Document clients are public, so a list of supported methods is acceptable when it offers "none",
+     * and the method, when the document names one, must be a member of it.
+     *
+     * @param  array<string, mixed>  $data
+     * @return string[]
+     */
+    protected function authMethods(array $data): array
+    {
+        $methods = $data['token_endpoint_auth_methods_supported'] ?? null;
+
+        return is_array($methods) ? array_values(array_filter($methods, 'is_string')) : ['none'];
     }
 
     /**
