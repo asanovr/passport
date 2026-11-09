@@ -12,6 +12,13 @@ use League\Uri\UriString;
 class DocumentValidator
 {
     /**
+     * The token endpoint authentication methods a document may not name, as they rest on a shared secret.
+     *
+     * @var string
+     */
+    protected const SHARED_SECRET_METHODS = 'client_secret_basic,client_secret_post,client_secret_jwt';
+
+    /**
      * Create a new document validator instance.
      */
     public function __construct(
@@ -39,9 +46,9 @@ class DocumentValidator
             'application_type' => ['string'],
             'software_id' => ['string'],
             'software_version' => ['string'],
-            'token_endpoint_auth_methods_supported' => ['list', 'min:1', 'contains:none'],
-            'token_endpoint_auth_methods_supported.*' => ['string'],
-            'token_endpoint_auth_method' => ['filled', 'string', Rule::in($this->authMethods($data))],
+            'token_endpoint_auth_methods_supported' => ['filled', 'list', 'contains:none'],
+            'token_endpoint_auth_methods_supported.*' => ['string', 'not_in:'.self::SHARED_SECRET_METHODS],
+            'token_endpoint_auth_method' => ['filled', 'string', 'not_in:'.self::SHARED_SECRET_METHODS, Rule::in($this->authMethods($data))],
             'redirect_uris' => ['required', 'list', 'max:10'],
             'redirect_uris.*' => ['required', 'string', 'max:2048'],
             'grant_types' => ['filled', 'list', 'contains:authorization_code'],

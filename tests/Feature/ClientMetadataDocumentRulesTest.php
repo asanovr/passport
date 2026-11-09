@@ -88,6 +88,13 @@ class ClientMetadataDocumentRulesTest extends PassportTestCase
             'supported methods that are a string' => [['token_endpoint_auth_methods_supported' => 'none']],
             'supported methods that include a number' => [['token_endpoint_auth_methods_supported' => ['none', 5]]],
             'supported methods that are an object' => [['token_endpoint_auth_methods_supported' => ['a' => 'none']]],
+            'empty supported methods as a string' => [['token_endpoint_auth_methods_supported' => '']],
+            'a shared secret method in both fields' => [[
+                'token_endpoint_auth_methods_supported' => ['none', 'client_secret_basic'],
+                'token_endpoint_auth_method' => 'client_secret_basic',
+            ]],
+            'a shared secret method beside none' => [['token_endpoint_auth_methods_supported' => ['none', 'client_secret_post']]],
+            'a shared secret method as the method' => [['token_endpoint_auth_method' => 'client_secret_jwt']],
             'client authentication by key' => [['token_endpoint_auth_method' => 'private_key_jwt']],
             'a client_secret' => [['client_secret' => 'shh']],
             'an empty client_secret' => [['client_secret' => null]],
